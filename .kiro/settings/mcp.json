@@ -1,0 +1,208 @@
+{
+  "mcpServers": {
+    "cloudflare-docs": {
+      "type": "http",
+      "url": "https://docs.mcp.cloudflare.com/mcp",
+      "description": "Cloudflare documentation search"
+    },
+    "mcpydoc": {
+      "command": "python",
+      "args": ["-m", "mcpydoc"],
+      "env": {},
+      "description": "Python package documentation and code analysis server (auto-detects venv). Install: pip install mcpydoc. Alt: use command='uvx', args=['mcpydoc'] for zero-install.",
+      "autoApprove": ["search_symbols"],
+      "disabled": true
+    },
+    "token-optimizer": {
+      "command": "npx",
+      "args": ["-y", "token-optimizer-mcp"],
+      "description": "Token optimization for 95%+ context reduction via content deduplication and compression"
+    }
+  },
+  "mcpServersDocker": {
+    "_comment": "Docker-based MCP servers. Run the pull command before first use. Used by agents that declare them in mcpServers.",
+    "aws-documentation": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "acuvity/mcp-server-aws-documentation"],
+      "description": "AWS documentation search, content recommendations, and markdown conversion",
+      "pull": "docker pull acuvity/mcp-server-aws-documentation",
+      "usedBy": ["devops"]
+    },
+    "aws-core-mcp-server": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "acuvity/mcp-server-aws-core"],
+      "description": "AWS core API operations (S3, EC2, IAM, etc.)",
+      "pull": "docker pull acuvity/mcp-server-aws-core",
+      "usedBy": ["devops"]
+    },
+    "aws-cloudwatch-logs": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "acuvity/mcp-server-aws-cloudwatch-logs"],
+      "description": "CloudWatch Logs querying and analysis with Logs Insights",
+      "pull": "docker pull acuvity/mcp-server-aws-cloudwatch-logs",
+      "usedBy": ["devops"]
+    },
+    "aws-ecs": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "acuvity/mcp-server-aws-ecs"],
+      "description": "ECS containerization, deployment, troubleshooting, and infrastructure management",
+      "pull": "docker pull acuvity/mcp-server-aws-ecs",
+      "usedBy": ["devops"]
+    },
+    "aws-cost-explorer": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "acuvity/mcp-server-aws-cost-explorer"],
+      "description": "AWS cost and usage analysis through Cost Explorer API",
+      "pull": "docker pull acuvity/mcp-server-aws-cost-explorer",
+      "usedBy": ["devops"]
+    }
+  },
+  "_disabled": {
+    "_comment": "Copy needed servers to mcpServers. Replace YOUR_*_HERE placeholders with real values. (필요 시 mcpServers로 복사. API 키는 실제 값으로 교체)",
+    "_category_deploy": "===== Deploy/Hosting (배포/호스팅) =====",
+    "vercel": {
+      "type": "http",
+      "url": "https://mcp.vercel.com",
+      "description": "Vercel deployments and projects"
+    },
+    "railway": {
+      "command": "npx",
+      "args": ["-y", "@railway/mcp-server"],
+      "description": "Railway deployments"
+    },
+    "_category_frontend": "===== Frontend/UI (프론트엔드/UI) =====",
+    "magic": {
+      "command": "npx",
+      "args": ["-y", "@magicuidesign/mcp@latest"],
+      "description": "Magic UI components (frontend projects)"
+    },
+    "laraplugins": {
+      "type": "http",
+      "url": "https://laraplugins.io/mcp/plugins",
+      "description": "Laravel plugin discovery — search packages by keyword, health score, Laravel/PHP version compatibility"
+    },
+    "_category_enterprise": "===== Enterprise Collaboration (엔터프라이즈 협업) =====",
+    "jira": {
+      "command": "uvx",
+      "args": ["mcp-atlassian==0.21.0"],
+      "env": {
+        "JIRA_URL": "YOUR_JIRA_URL_HERE",
+        "JIRA_EMAIL": "YOUR_JIRA_EMAIL_HERE",
+        "JIRA_API_TOKEN": "YOUR_JIRA_API_TOKEN_HERE"
+      },
+      "description": "Jira issue tracking — search, create, update, comment, transition issues"
+    },
+    "confluence": {
+      "command": "npx",
+      "args": ["-y", "confluence-mcp-server"],
+      "env": {
+        "CONFLUENCE_BASE_URL": "YOUR_CONFLUENCE_URL_HERE",
+        "CONFLUENCE_EMAIL": "YOUR_EMAIL_HERE",
+        "CONFLUENCE_API_TOKEN": "YOUR_CONFLUENCE_TOKEN_HERE"
+      },
+      "description": "Confluence Cloud — search pages, retrieve content, explore spaces"
+    },
+    "_category_db": "===== Database/Analytics (데이터베이스/분석) =====",
+    "supabase": {
+      "command": "npx",
+      "args": ["-y", "@supabase/mcp-server-supabase@latest", "--project-ref=YOUR_PROJECT_REF"],
+      "description": "Supabase database operations"
+    },
+    "clickhouse": {
+      "type": "http",
+      "url": "https://mcp.clickhouse.cloud/mcp",
+      "description": "ClickHouse analytics queries"
+    },
+    "_category_research": "===== Web Search/Scraping (웹 검색/스크래핑) =====",
+    "firecrawl": {
+      "command": "npx",
+      "args": ["-y", "firecrawl-mcp"],
+      "env": {
+        "FIRECRAWL_API_KEY": "YOUR_FIRECRAWL_KEY_HERE"
+      },
+      "description": "Web scraping and crawling"
+    },
+    "exa-web-search": {
+      "command": "npx",
+      "args": ["-y", "exa-mcp-server"],
+      "env": {
+        "EXA_API_KEY": "YOUR_EXA_API_KEY_HERE"
+      },
+      "description": "Web search, research, and data ingestion via Exa API — prefer task-scoped use for broader research after primary docs"
+    },
+    "_category_ai_media": "===== AI Media Generation (AI 미디어 생성) =====",
+    "fal-ai": {
+      "command": "npx",
+      "args": ["-y", "fal-ai-mcp-server"],
+      "env": {
+        "FAL_KEY": "YOUR_FAL_KEY_HERE"
+      },
+      "description": "AI image/video/audio generation via fal.ai models"
+    },
+    "_category_browser": "===== Browser Automation (브라우저 자동화) =====",
+    "browserbase": {
+      "command": "npx",
+      "args": ["-y", "@browserbasehq/mcp-server-browserbase"],
+      "env": {
+        "BROWSERBASE_API_KEY": "YOUR_BROWSERBASE_KEY_HERE"
+      },
+      "description": "Cloud browser sessions via Browserbase"
+    },
+    "browser-use": {
+      "type": "http",
+      "url": "https://api.browser-use.com/mcp",
+      "headers": {
+        "x-browser-use-api-key": "YOUR_BROWSER_USE_KEY_HERE"
+      },
+      "description": "AI browser agent for web tasks"
+    },
+    "_category_cloudflare": "===== Cloudflare Extensions (Cloudflare 확장) =====",
+    "cloudflare-workers-builds": {
+      "type": "http",
+      "url": "https://builds.mcp.cloudflare.com/mcp",
+      "description": "Cloudflare Workers builds"
+    },
+    "cloudflare-workers-bindings": {
+      "type": "http",
+      "url": "https://bindings.mcp.cloudflare.com/mcp",
+      "description": "Cloudflare Workers bindings"
+    },
+    "cloudflare-observability": {
+      "type": "http",
+      "url": "https://observability.mcp.cloudflare.com/mcp",
+      "description": "Cloudflare observability/logs"
+    },
+    "_category_agent_tools": "===== Advanced Agent Tools (고급 에이전트 도구) =====",
+    "omega-memory": {
+      "command": "uvx",
+      "args": ["omega-memory", "serve"],
+      "description": "Persistent agent memory with semantic search, multi-agent coordination, and knowledge graphs (richer than basic memory store)"
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/your/projects"],
+      "description": "Filesystem operations — replace /path/to/your/projects with your actual path"
+    },
+    "devfleet": {
+      "type": "http",
+      "url": "http://localhost:18801/mcp",
+      "description": "Multi-agent orchestration — dispatch parallel agents in isolated worktrees. Repo: https://github.com/LEC-AI/claude-devfleet"
+    },
+    "evalview": {
+      "command": "python3",
+      "args": ["-m", "evalview", "mcp", "serve"],
+      "env": {
+        "OPENAI_API_KEY": "YOUR_OPENAI_API_KEY_HERE"
+      },
+      "description": "AI agent regression testing — snapshot behavior, detect regressions in tool calls and output quality. Install: pip install \"evalview>=0.5,<1\""
+    }
+  },
+  "_comments": {
+    "usage": "Copy needed servers to .kiro/settings/mcp.json",
+    "docker": "For mcpServersDocker entries, run the pull command first: docker pull <image>",
+    "env_vars": "Replace YOUR_*_HERE placeholders in _disabled section with actual values before moving to mcpServers",
+    "excluded": "memory, sequential-thinking, context7, github, playwright are built into Kiro — not listed here",
+    "context_warning": "Keep active MCP servers under 10 to preserve context window",
+    "categories": "_category_* keys in _disabled are visual section headers only, ignored by MCP clients"
+  }
+}

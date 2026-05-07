@@ -1,0 +1,39 @@
+{
+  "name": "obsidian-transcribe-plugin",
+  "version": "0.1.0",
+  "description": "Transcribe microphone audio in real time via AWS Transcribe and analyze results with AWS Bedrock.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "obsidian",
+    "plugin",
+    "transcribe",
+    "aws",
+    "bedrock"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "18.19.0",
+    "@vitest/coverage-v8": "1.6.0",
+    "aws-sdk-client-mock": "4.0.0",
+    "builtin-modules": "3.3.0",
+    "esbuild": "0.21.5",
+    "fast-check": "3.19.0",
+    "jsdom": "24.1.0",
+    "obsidian": "1.4.11",
+    "typescript": "5.4.5",
+    "vitest": "1.6.0"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "3.600.0",
+    "@aws-sdk/client-transcribe-streaming": "3.600.0"
+  }
+}

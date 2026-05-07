@@ -1,0 +1,23 @@
+{
+  "name": "Diagnostics After Code Edit",
+  "version": "1.0.0",
+  "description": "Diagnostics After Code Edit",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "*.ts",
+      "*.tsx",
+      "*.js",
+      "*.jsx",
+      "*.py",
+      "*.go",
+      "*.rs",
+      "*.java",
+      "*.kt"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A code file was edited. Use getDiagnostics to check for compile errors, lint errors, and type errors. Report any issues found concisely. Do NOT use executeBash or terminal."
+  }
+}

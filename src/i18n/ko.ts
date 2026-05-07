@@ -1,0 +1,133 @@
+// 한국어 번역 파일
+// - en.ts의 `Translations` 타입을 `import type`으로 가져와 준수한다.
+// - 누락된 키가 있으면 컴파일 타임(tsc --noEmit)에 검출된다 (Requirement 10.1, 10.2).
+// - 모든 UI 라벨은 자연스러운 한국어 표현을 우선하여 번역한다.
+
+import type { Translations } from "./en";
+
+export const ko: Translations = {
+    view: {
+        displayText: "전사",
+    },
+    commands: {
+        openView: "전사 뷰 열기",
+    },
+    buttons: {
+        start: "스트리밍 시작",
+        stop: "스트리밍 중지",
+        edit: "편집",
+        analyze: "분석",
+        save: "저장",
+        cancel: "취소",
+    },
+    states: {
+        idle: "대기",
+        streaming: "스트리밍 중",
+        stopped: "중지됨",
+        error: "오류",
+        reconnecting: "재연결 시도 중...",
+    },
+    ui: {
+        // Sidebar_View 빈 상태 안내 (Requirement 1.10)
+        empty: "전사된 내용이 없습니다.",
+        // Bedrock 분석 진행 중 스피너 레이블 (Requirement 6.6)
+        analyzing: "분석 중...",
+        // 편집 모드 빈 내용 안내
+        editorEmpty: "편집할 내용이 없습니다.",
+    },
+    settings: {
+        // UI_Locale 드롭다운 (Requirement 2.2 — 설정 탭의 첫 항목)
+        language: {
+            name: "표시 언어",
+            desc: "플러그인 UI에서 사용할 표시 언어를 선택합니다.",
+            options: {
+                en: "English",
+                ko: "한국어",
+            },
+        },
+        // AWS 자격 증명 섹션 (Requirement 2.4 — setHeading 사용)
+        awsHeading: "AWS 자격 증명",
+        accessKeyId: {
+            name: "AWS 액세스 키 ID",
+            desc: "AWS IAM 액세스 키 ID (최대 128자).",
+        },
+        secretAccessKey: {
+            name: "AWS 비밀 액세스 키",
+            desc: "AWS IAM 비밀 액세스 키 (최대 256자). 마스킹되어 입력됩니다.",
+        },
+        region: {
+            name: "AWS 리전",
+            desc: "AWS Transcribe 및 Bedrock 요청에 사용할 리전입니다.",
+        },
+        // 전사 설정 섹션
+        transcriptionHeading: "전사",
+        languageCode: {
+            name: "전사 언어",
+            desc: "전사할 음성의 언어 코드입니다.",
+        },
+        transcriptFolder: {
+            name: "전사 저장 폴더",
+            desc: "전사 노트를 저장할 볼트 폴더입니다. 비워두면 볼트 루트에 저장됩니다.",
+        },
+        // 분석 설정 섹션
+        analysisHeading: "분석",
+        bedrockModelId: {
+            name: "Bedrock 모델 ID",
+            desc: "분석에 사용할 파운데이션 모델 식별자입니다 (예: anthropic.claude-3-sonnet-20240229-v1:0).",
+        },
+        // About 섹션 — 보안 고지 (Requirement 2.13)
+        aboutHeading: "정보",
+        aboutNotice:
+            "AWS 자격 증명은 .obsidian/plugins/obsidian-transcribe-plugin/data.json에 평문으로 저장됩니다. 볼트를 공유하거나 동기화할 때 이 파일도 함께 전송될 수 있습니다.",
+    },
+    notices: {
+        // 마이크 권한 거부 (Requirement 3.9)
+        micPermissionDenied: "전사를 시작하려면 마이크 권한이 필요합니다.",
+        // Transcribe 세션 수립 타임아웃 (Requirement 3.10)
+        sessionTimeout: "10초 이내에 전사 세션을 수립하지 못했습니다.",
+        // 연결 단절 (Requirement 3.11, 8.5)
+        connectionLost: "AWS Transcribe 연결이 끊어졌습니다.",
+        // 재연결 시도 중 (Requirement 8.6)
+        reconnecting: "AWS Transcribe에 재연결하고 있습니다...",
+        // 재연결 최종 실패 (Requirement 8.7, 8.8)
+        reconnectFailed:
+            "AWS Transcribe 재연결에 실패했습니다. 현재까지의 전사 내용은 저장되었습니다.",
+        // AWS 인증/권한 오류 (Requirement 6.13)
+        awsAuthError:
+            "AWS 인증에 실패했습니다. 액세스 키 ID와 비밀 액세스 키를 확인해 주세요.",
+        // Bedrock 모델 리전 미지원 (Requirement 6.14)
+        awsModelUnavailable:
+            "선택한 Bedrock 모델은 설정된 리전에서 사용할 수 없습니다.",
+        // AWS 네트워크 오류 (Requirement 6.15)
+        awsNetworkError: "AWS와 통신하는 중 네트워크 오류가 발생했습니다.",
+        // 파일 I/O 오류 (Requirement 4.8, 5.7)
+        ioError: "파일 입출력 오류가 발생했습니다. 작성 중인 내용은 보존되었습니다.",
+        // 설정 미완료 일반 메시지
+        settingsIncomplete: "설정이 완료되지 않았습니다. 누락된 항목을 입력한 뒤 다시 시도해 주세요.",
+        // 누락된 설정 항목을 나열하는 함수형 메시지 (Requirement 2.14)
+        missingSettings: (fields: string[]): string => `누락된 설정: ${fields.join(", ")}`,
+        // 전사 버퍼가 비어 있어 노트를 생성하지 않음 (Requirement 4.9)
+        bufferEmpty: "전사 내용이 비어 있어 노트를 생성하지 않았습니다.",
+        // 본문 길이 초과로 분석 중단 (Requirement 6.5)
+        transcriptTooLong:
+            "전사 본문이 100,000자를 초과하여 분석할 수 없습니다.",
+        // Transcript_Folder 생성 실패 fallback (Requirement 4.5)
+        folderCreateFailed:
+            "전사 폴더를 생성하지 못했습니다. 볼트 루트에 저장합니다.",
+        // 세션 종료 지연 경고 (Requirement 4.10)
+        sessionTerminateSlow:
+            "전사 세션이 제때 종료되지 않아 강제로 종료했습니다.",
+        // 편집 저장 시 내용이 비어 있음 (Requirement 5.8)
+        editEmpty: "내용이 비어 있어 저장하지 않았습니다.",
+        // 스트리밍 중 편집/분석 차단 (Requirement 7.4)
+        streamingBlockEditAnalyze: "스트리밍 중에는 편집과 분석을 사용할 수 없습니다.",
+        // 설정 저장 성공 (Requirement 2.11)
+        settingsSaved: "설정이 저장되었습니다.",
+        // 설정 저장 실패 (Requirement 2.15)
+        settingsSaveFailed: "설정을 저장하지 못했습니다.",
+        // 단일 세션 불변식 위반 방지 (Requirement 7.6)
+        singleSessionActive: "이미 진행 중인 전사 세션이 있습니다.",
+    },
+    // 분석 결과를 Transcript_Note에 부착할 때 사용하는 섹션 헤더 (Requirement 6.8)
+    analysisHeader: "## 분석 결과",
+};

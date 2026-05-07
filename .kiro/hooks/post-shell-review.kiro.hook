@@ -1,0 +1,15 @@
+{
+  "name": "Post-Shell Error Check",
+  "version": "1.0.0",
+  "description": "Post-Shell Error Check",
+  "when": {
+    "type": "postToolUse",
+    "toolTypes": [
+      "shell"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Check the shell command result. If the exit code is non-zero or stderr contains errors: 1) Summarize the error in one line, 2) Suggest a fix. If the command succeeded, proceed silently."
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "Post-Write Cleanup Check",
+  "version": "1.0.0",
+  "description": "Post-Write Cleanup Check",
+  "when": {
+    "type": "postToolUse",
+    "toolTypes": [
+      "write"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Briefly check the file just written for: 1) any console.log/print statements left for debugging (flag for removal — ignore console.error/console.warn/logger calls), 2) commented-out code blocks that should be removed. Only report if issues are found. Do not report on test files."
+  }
+}

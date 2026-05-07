@@ -1,0 +1,227 @@
+/*
+ * Transcribe 플러그인 스타일시트
+ *
+ * 원칙:
+ * - 모든 색상/폰트/간격은 Obsidian CSS 변수만 사용한다. (하드코딩 금지)
+ * - 테마 호환성을 위해 hex/rgb 색상, px 폰트 크기 지정을 피한다.
+ * - 레이아웃 목적의 최소한의 수치(경계선 두께, min-height 등)만 상수 사용.
+ *
+ * Requirements: 3.5, 9.7
+ */
+
+/* ─────────────────────────────────────────────
+ * 1. 컨테이너 — 사이드바 루트
+ * ───────────────────────────────────────────── */
+.transcribe-sidebar {
+    padding: var(--size-4-3);
+    color: var(--text-normal);
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-3);
+    height: 100%;
+    box-sizing: border-box;
+}
+
+/* ─────────────────────────────────────────────
+ * 2. 상태 영역 — idle/streaming/stopped/error/reconnecting 표시
+ * ───────────────────────────────────────────── */
+.transcribe-status {
+    background: var(--background-secondary);
+    border-radius: var(--radius-m);
+    padding: var(--size-4-2);
+    border-left: 3px solid transparent; /* 상태별 강조 바용 고정 슬롯 */
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-1);
+}
+
+/* 스트리밍 중 — interactive-accent 색으로 강조 */
+.transcribe-status[data-state="streaming"] {
+    border-left-color: var(--interactive-accent);
+}
+
+/* 오류 상태 — 에러 색으로 강조 */
+.transcribe-status[data-state="error"] {
+    border-left-color: var(--background-modifier-error);
+}
+
+/* 상태 레이블 — 주요 상태 텍스트 */
+.transcribe-status .state-label {
+    font-size: var(--font-ui-medium);
+    color: var(--text-normal);
+}
+
+/* 재연결 레이블 — 보조 텍스트로 뮤트 처리 */
+.transcribe-status .reconnect-label {
+    font-size: var(--font-ui-small);
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* ─────────────────────────────────────────────
+ * 3. 컨트롤 영역 — 시작/중지, 편집, 분석 버튼 행
+ * ───────────────────────────────────────────── */
+.transcribe-controls {
+    display: flex;
+    gap: var(--size-4-2);
+    margin-top: var(--size-4-3);
+    flex-wrap: wrap;
+}
+
+/* 공통 버튼 기본 스타일 — Obsidian 기본 버튼 스타일 보완 */
+.transcribe-controls button {
+    padding: var(--size-4-1) var(--size-4-3);
+    border-radius: var(--radius-s);
+    font-size: var(--font-ui-small);
+    cursor: pointer;
+}
+
+/* 시작/중지 버튼 — 주요 액션으로 accent 색상 적용 */
+.start-stop-btn {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border: none;
+}
+
+.start-stop-btn:hover:not(:disabled) {
+    background: var(--interactive-accent-hover);
+}
+
+/* 편집/분석 버튼 — 보조 액션으로 기본 배경 사용 */
+.edit-btn,
+.analyze-btn {
+    background: var(--interactive-normal);
+    color: var(--text-normal);
+    border: 1px solid var(--background-modifier-border);
+}
+
+.edit-btn:hover:not(:disabled),
+.analyze-btn:hover:not(:disabled) {
+    background: var(--interactive-hover);
+}
+
+/* 비활성 상태 — 모든 컨트롤 버튼 공통 */
+.transcribe-controls button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ─────────────────────────────────────────────
+ * 4. 스피너 — 분석 진행 중 표시, 기본 숨김(.is-hidden)
+ * ───────────────────────────────────────────── */
+.transcribe-spinner {
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+    padding: var(--size-4-1) var(--size-4-2);
+    font-style: italic;
+}
+
+/* ─────────────────────────────────────────────
+ * 5. 콘텐츠 영역 — 전사 본문 (읽기/편집 공통 컨테이너)
+ * ───────────────────────────────────────────── */
+.transcribe-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-2);
+    flex: 1;
+    min-height: 0; /* flex 자식이 overflow 스크롤을 갖도록 */
+}
+
+/* 전사 텍스트 — 모노스페이스로 실시간 표시, 세로 스크롤 */
+.transcript-text {
+    font-family: var(--font-monospace);
+    font-size: var(--font-ui-small);
+    color: var(--text-normal);
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    padding: var(--size-4-2);
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-y: auto;
+    max-height: 60vh;
+    flex: 1;
+}
+
+/* Partial 결과 — 확정 전이므로 뮤트/이탤릭 처리 */
+.transcript-text .partial {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* 빈 상태 — 안내 문구가 들어가는 경우 뮤트 */
+.transcript-text.is-empty {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* ─────────────────────────────────────────────
+ * 6. 편집 모드 — textarea 및 저장/취소 버튼
+ * ───────────────────────────────────────────── */
+.transcribe-editor {
+    width: 100%;
+    min-height: 12em;
+    max-height: 60vh;
+    padding: var(--size-4-2);
+    font-family: var(--font-monospace);
+    font-size: var(--font-ui-small);
+    color: var(--text-normal);
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    resize: vertical;
+    box-sizing: border-box;
+}
+
+.transcribe-editor:focus {
+    border-color: var(--interactive-accent);
+    outline: none;
+}
+
+/* 편집 모드 하단 컨트롤 행 */
+.transcribe-editor-controls {
+    display: flex;
+    gap: var(--size-4-2);
+    justify-content: flex-end;
+}
+
+.transcribe-editor-controls button {
+    padding: var(--size-4-1) var(--size-4-3);
+    border-radius: var(--radius-s);
+    font-size: var(--font-ui-small);
+    cursor: pointer;
+}
+
+/* 저장 버튼 — 주요 액션 */
+.save-btn {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border: none;
+}
+
+.save-btn:hover:not(:disabled) {
+    background: var(--interactive-accent-hover);
+}
+
+/* 취소 버튼 — 보조 액션 */
+.cancel-btn {
+    background: var(--interactive-normal);
+    color: var(--text-normal);
+    border: 1px solid var(--background-modifier-border);
+}
+
+.cancel-btn:hover:not(:disabled) {
+    background: var(--interactive-hover);
+}
+
+.transcribe-editor-controls button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ─────────────────────────────────────────────
+ * 7. 유틸리티 — 공통 숨김 클래스
+ * ───────────────────────────────────────────── */
+.is-hidden {
+    display: none;
+}

@@ -1,0 +1,23 @@
+{
+  "name": "New File Standards Check",
+  "version": "1.0.0",
+  "description": "New File Standards Check",
+  "when": {
+    "type": "fileCreated",
+    "patterns": [
+      "*.ts",
+      "*.tsx",
+      "*.js",
+      "*.jsx",
+      "*.py",
+      "*.go",
+      "*.rs",
+      "*.java",
+      "*.kt"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A new code file was created. Verify it follows project conventions: 1) Proper file header/imports structure, 2) Consistent naming with existing files in the same directory, 3) Exports are properly defined if it's a module. Only report issues — do not modify the file."
+  }
+}
