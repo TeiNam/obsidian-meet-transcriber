@@ -117,37 +117,50 @@ export type BedrockClientFactory = (
 /**
  * locale별 분석 프롬프트.
  *
- * design.md §7 "분석 프롬프트(locale별)"에서 확정된 고정 문자열을 사용한다.
- * 수정 시 설계 문서와 동기화되어야 한다(요약 품질 영향 요인).
+ * 회의록 작성에 최적화된 고정 프롬프트. 음성 전사 특성(구어체, 반복, 필러 등)을
+ * 감안해 정리된 회의록 형태로 출력하도록 지시한다.
  *
  * 구조:
- *   (1) 핵심 요약 — 3~5 문장
+ *   (1) 회의 요약 — 핵심 논의 사항과 결론 3~5 문장
  *   (2) 주요 키워드 — 5~10 개
- *   (3) 실행 항목(action items) — 반드시 Markdown **체크박스(`- [ ]`)** 형식으로 반환.
- *       Obsidian 에서 그대로 할 일 목록으로 체크할 수 있도록 한다. 항목이 없으면
- *       해당 섹션 자체를 생략한다.
+ *   (3) 결정 사항 — 회의에서 확정된 내용 (불릿)
+ *   (4) 실행 항목(action items) — 반드시 Markdown 체크박스(`- [ ]`) 형식
+ *       담당자/마감일이 언급되면 괄호로 덧붙임. 항목 없으면 섹션 생략.
+ *   (5) 참고 사항 — 후속 회의 일정, 미결 이슈 등 (있으면)
  */
 const PROMPT_BY_LOCALE: Record<SupportedLocale, string> = {
 	en:
-		"The following is a meeting/lecture transcript. Summarize in concise markdown with exactly these three sections in order:\n" +
+		"The following is a raw speech-to-text transcript of a meeting. " +
+		"It may contain filler words, repetitions, and informal language. " +
+		"Transform it into clean, professional meeting minutes in markdown with these sections in order:\n\n" +
 		"## Summary\n" +
-		"3-5 sentences capturing the key points.\n\n" +
+		"3-5 sentences capturing the key discussion points and conclusions.\n\n" +
 		"## Keywords\n" +
-		"5-10 main keywords as a comma-separated list or bullet points.\n\n" +
+		"5-10 main topics or terms discussed, as bullet points.\n\n" +
+		"## Decisions\n" +
+		"Bullet list of decisions or agreements made during the meeting. If none, omit this section.\n\n" +
 		"## Action items\n" +
-		"Every action item MUST be a GitHub-style markdown task list checkbox, starting with `- [ ] `. " +
-		"Include an owner and due date in parentheses when they are mentioned in the transcript. " +
-		"If there are no action items, omit this section entirely.",
+		"Every action item MUST be a GitHub-style markdown task list checkbox (`- [ ] `). " +
+		"Include the owner in parentheses when mentioned. Include due date if stated. " +
+		"If there are no action items, omit this section entirely.\n\n" +
+		"## Notes\n" +
+		"Any follow-up meeting schedules, open questions, or parking lot items. If none, omit this section.",
 	ko:
-		"다음은 회의/강의 전사 내용입니다. 아래 세 섹션 순서대로 간결한 마크다운으로 정리해 주세요:\n" +
+		"다음은 회의의 음성 전사(STT) 원문입니다. " +
+		"구어체 표현, 반복, 필러 단어가 포함되어 있을 수 있습니다. " +
+		"이를 깔끔하고 전문적인 회의록 형태의 마크다운으로 정리해 주세요. 아래 섹션 순서를 따릅니다:\n\n" +
 		"## 요약\n" +
-		"핵심을 담은 3~5문장.\n\n" +
+		"핵심 논의 사항과 결론을 담은 3~5문장.\n\n" +
 		"## 키워드\n" +
-		"주요 키워드 5~10개를 쉼표 구분 또는 불릿으로.\n\n" +
+		"논의된 주요 주제/용어 5~10개를 불릿으로.\n\n" +
+		"## 결정 사항\n" +
+		"회의에서 확정된 내용을 불릿 리스트로. 없으면 이 섹션을 생략합니다.\n\n" +
 		"## 실행 항목\n" +
 		"실행 항목은 반드시 GitHub 스타일 마크다운 체크박스(`- [ ] `)로 작성합니다. " +
-		"전사에 담당자나 마감일이 언급되면 괄호로 덧붙여 주세요. " +
-		"실행 항목이 없다면 이 섹션 자체를 생략합니다.",
+		"담당자가 언급되면 괄호로 덧붙이고, 마감일이 있으면 함께 기재합니다. " +
+		"실행 항목이 없다면 이 섹션을 생략합니다.\n\n" +
+		"## 참고 사항\n" +
+		"후속 회의 일정, 미결 이슈, 파킹랏 항목 등. 없으면 이 섹션을 생략합니다.",
 };
 
 /**
