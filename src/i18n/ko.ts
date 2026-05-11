@@ -10,7 +10,8 @@ export const ko: Translations = {
         displayText: "전사",
         // 사이드바 최상단에 표시되는 섹션 제목. 탭 라벨(displayText)과 별개로
         // 사이드바가 독립 뷰처럼 보이도록 컨텐츠 영역 내부에도 타이틀을 노출한다.
-        sidebarTitle: "회의 전사",
+        // 제품 아이덴티티를 드러내는 고유명사 성격이므로 로케일과 무관하게 영어로 통일한다.
+        sidebarTitle: "Meeting Transcriber",
     },
     commands: {
         openView: "전사 뷰 열기",
