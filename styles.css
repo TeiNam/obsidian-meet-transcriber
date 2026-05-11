@@ -22,6 +22,16 @@
     box-sizing: border-box;
 }
 
+/* 사이드바 최상단 타이틀 — 뷰 내부 섹션 제목 */
+.transcribe-title {
+    font-size: var(--font-ui-large);
+    font-weight: var(--font-bold);
+    color: var(--text-normal);
+    padding-bottom: var(--size-4-2);
+    border-bottom: 1px solid var(--background-modifier-border);
+    letter-spacing: 0.01em;
+}
+
 /* ─────────────────────────────────────────────
  * 2. 상태 영역 — idle/streaming/stopped/error/reconnecting 표시
  * ───────────────────────────────────────────── */

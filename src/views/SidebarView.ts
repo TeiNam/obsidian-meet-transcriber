@@ -242,6 +242,14 @@ export class SidebarView extends ItemView {
 
 		const root = this.contentEl.createDiv({ cls: "transcribe-sidebar" });
 
+		// 사이드바 최상단 타이틀 — 탭 헤더와 별개로 뷰 내부에 섹션 제목을 한 번 더
+		// 노출해 사이드바가 독립된 패널처럼 보이도록 한다. 단순 텍스트 div 로 둔다
+		// (설정 탭 섹션 헤딩에만 적용되는 setHeading 규칙과는 다른 맥락).
+		root.createDiv({
+			cls: "transcribe-title",
+			text: this.plugin.t.view.sidebarTitle,
+		});
+
 		this.renderStatus(root);
 		this.renderInlineControls(root);
 		this.renderControls(root);
