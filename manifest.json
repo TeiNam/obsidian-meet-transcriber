@@ -1,7 +1,7 @@
 {
   "id": "obsidian-transcribe-plugin",
   "name": "Transcribe",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "minAppVersion": "1.4.0",
   "description": "Transcribe microphone audio in real time via AWS Transcribe and analyze results with AWS Bedrock.",
   "author": "teinam",

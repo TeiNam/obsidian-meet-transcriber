@@ -178,6 +178,20 @@ Transcribe Streaming 과 Bedrock 이 **동일 리전에서 모두 지원**되는
 
 [MIT License](./LICENSE)
 
+### 개발자 — 릴리스 절차
+
+다음 버전을 배포할 때는 `npm version` 을 사용해 세 파일(`package.json`, `manifest.json`, `versions.json`)을 한 번에 동기화한 뒤 태그를 푸시합니다. 태그 푸시 이벤트가 GitHub Actions `Release` 워크플로우를 트리거해 자동으로 번들을 빌드하고 `main.js`, `manifest.json`, `styles.css` 를 릴리스 자산으로 업로드합니다.
+
+```bash
+# 1.0.1 등 다음 버전으로 올리기 (커밋 + 태그 자동 생성, v 접두사 없음)
+npm version 1.0.1 -m "chore(release): %s"
+
+# 커밋과 태그를 함께 푸시
+git push --follow-tags origin main
+```
+
+태그 이름은 `manifest.json.version` 과 정확히 일치해야 합니다(워크플로우가 검증합니다).
+
 ---
 
 ## 🇺🇸 English
@@ -343,3 +357,17 @@ Configure the following under `Settings → Community plugins → Transcribe →
 ### License
 
 [MIT License](./LICENSE)
+
+### Developer — release flow
+
+To cut a new version, use `npm version` so that `package.json`, `manifest.json`, and `versions.json` all move together in a single commit, then push the tag. The tag push triggers the GitHub Actions `Release` workflow, which builds the bundle and uploads `main.js`, `manifest.json`, and `styles.css` as release assets automatically.
+
+```bash
+# Bump to the next version (creates a commit and tag, no "v" prefix)
+npm version 1.0.1 -m "chore(release): %s"
+
+# Push the commit and tag together
+git push --follow-tags origin main
+```
+
+The tag name must exactly match `manifest.json.version` — the workflow verifies this.

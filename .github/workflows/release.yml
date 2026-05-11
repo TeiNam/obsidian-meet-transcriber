@@ -1,0 +1,70 @@
+name: Release
+
+# Obsidian 커뮤니티 플러그인 배포용 워크플로우.
+#
+# 트리거: SemVer 형식의 태그 푸시(예: `1.0.0`, `1.0.1`).
+# 동작: Node 환경에서 production 번들을 빌드한 뒤 `main.js` / `manifest.json` /
+#       `styles.css` 를 GitHub Release 자산으로 업로드한다.
+# 검증: 태그 이름과 `manifest.json.version` 이 일치하지 않으면 즉시 실패 처리하여
+#       실수로 버전을 올리지 않은 채 태그를 푸시하는 경우를 막는다.
+#
+# Obsidian 릴리스 관례에 따라 태그는 `v` 접두사 없이 버전 문자열 그대로 사용한다.
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+-*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify tag matches manifest.json version
+        run: |
+          TAG="${GITHUB_REF##*/}"
+          MANIFEST_VERSION="$(node -p "require('./manifest.json').version")"
+          if [ "$TAG" != "$MANIFEST_VERSION" ]; then
+            echo "::error::Tag ($TAG) does not match manifest.json version ($MANIFEST_VERSION)"
+            exit 1
+          fi
+          echo "Tag $TAG matches manifest.json version"
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build production bundle
+        run: npm run build
+
+      - name: Stage release assets
+        run: |
+          mkdir -p release
+          cp main.js manifest.json styles.css release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          files: |
+            release/main.js
+            release/manifest.json
+            release/styles.css
