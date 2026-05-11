@@ -94,6 +94,13 @@ function createFakePlugin(
 		handleAnalyzeClick: vi.fn(),
 		handleSaveEditClick: vi.fn().mockResolvedValue(undefined),
 		handleCancelEditClick: vi.fn(),
+		// 사이드바 인라인 컨트롤 계약(TASK 13) — stub 기본값.
+		getCurrentLanguage: vi.fn(() => "ko-KR" as const),
+		getCurrentModelId: vi.fn(() => ""),
+		setLanguage: vi.fn().mockResolvedValue(undefined),
+		setModelId: vi.fn().mockResolvedValue(undefined),
+		getAvailableModels: vi.fn(() => []),
+		refreshAvailableModels: vi.fn().mockResolvedValue([]),
 	};
 	// vi.fn 구체 타입과 `Mock<any[], unknown>` 사이의 공변성 차이를 우회한다.
 	// 런타임 동작은 동일하며, 테스트는 반환값의 `.mock.calls` 를 확인할 뿐이다.

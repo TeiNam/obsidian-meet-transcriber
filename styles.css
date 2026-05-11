@@ -446,8 +446,73 @@
     width: 100%;
 }
 
-/* 모델 드롭다운 — 전체 너비에서 새로고침 버튼 공간만 빼고 차지 */
-.setting-item:has(.transcribe-model-dropdown) select.dropdown {
-    flex: 1;
+/* ─────────────────────────────────────────────
+ * 11. 사이드바 인라인 컨트롤 — 언어/모델 빠른 선택
+ *     상태 영역과 컨트롤 버튼 사이에 배치된다. 좁은 사이드바 폭에 맞춰 세로 스택 레이아웃.
+ * ───────────────────────────────────────────── */
+.transcribe-inline-controls {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-2);
+}
+
+.transcribe-inline-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--size-4-2);
+}
+
+.transcribe-inline-label {
+    flex: 0 0 auto;
+    min-width: 3.5em;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
+
+.transcribe-inline-select {
+    flex: 1 1 auto;
     min-width: 0;
+    font-size: var(--font-ui-small);
+}
+
+/* 모델 드롭다운 옆 새로고침 아이콘 — 설정 탭의 extraSettingsEl 과 비슷한 크기. */
+.transcribe-inline-refresh {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 4px;
+    background: var(--background-secondary);
+    color: var(--text-muted);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.transcribe-inline-refresh:hover:not(.is-loading) {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+}
+
+.transcribe-inline-refresh.is-loading {
+    opacity: 0.5;
+    cursor: progress;
+}
+
+.transcribe-inline-refresh .svg-icon {
+    width: 16px;
+    height: 16px;
+}
+
+.transcribe-inline-refresh.is-loading .svg-icon {
+    animation: transcribe-spin 1s linear infinite;
+}
+
+@keyframes transcribe-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
 }

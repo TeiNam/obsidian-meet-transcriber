@@ -42,6 +42,15 @@ export const en = {
         // 복사 실패 Notice
         copyFailed: "Failed to copy transcript to clipboard.",
     },
+    // 사이드바 인라인 컨트롤(언어/모델 선택) 라벨.
+    // 설정 탭을 거치지 않고도 빠르게 세션 언어/분석 모델을 바꿀 수 있도록 하는 영역의 i18n.
+    sidebar: {
+        language: "Language",
+        model: "Model",
+        refreshModels: "Refresh models",
+        modelsLoading: "Loading...",
+        noModelsHint: "Enter credentials and refresh.",
+    },
     settings: {
         // UI_Locale 드롭다운 (Requirement 2.2 — 설정 탭의 첫 항목)
         language: {

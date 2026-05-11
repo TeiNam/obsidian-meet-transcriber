@@ -38,13 +38,21 @@ import { StreamingStateMachine } from "./state/StreamingStateMachine";
 import type { StreamingState } from "./state/StreamingStateMachine";
 import { AudioCapture } from "./services/AudioCapture";
 import { BedrockService } from "./services/BedrockService";
+import {
+	BedrockModelCatalog,
+	type BedrockCatalogEntry,
+} from "./services/BedrockModelCatalog";
 import { NoteStore, type TranscriptNoteMeta } from "./services/NoteStore";
 import {
 	TranscribeService,
 	type TranscribeCallbacks,
 } from "./services/TranscribeService";
 import { TranscribeError } from "./types/errors";
-import type { AwsCredentials, TranscribeSettings } from "./types/settings";
+import type {
+	AwsCredentials,
+	LanguageCode,
+	TranscribeSettings,
+} from "./types/settings";
 import {
 	SidebarView,
 	VIEW_TYPE_TRANSCRIBE,
@@ -97,6 +105,22 @@ export default class TranscribePlugin extends Plugin {
 
 	/** AI 분석 서비스. */
 	bedrockService!: BedrockService;
+
+	/**
+	 * Bedrock 모델 카탈로그 조회 서비스.
+	 *
+	 * 설정 탭/사이드바 양쪽에서 "호출 가능한 모델 목록" 을 공유해야 하므로
+	 * 플러그인 레벨에 단일 인스턴스를 둔다. 상태(캐시)는 `cachedModels` 에 별도로 보관.
+	 */
+	modelCatalog!: BedrockModelCatalog;
+
+	/**
+	 * 가장 최근에 성공한 모델 카탈로그 조회 결과.
+	 *
+	 * 사이드바가 열릴 때/설정 탭이 열릴 때 즉시 드롭다운을 채울 수 있도록 메모리에 유지한다.
+	 * AWS 호출은 사용자가 명시적으로 새로고침 아이콘을 눌렀을 때에만 발생한다.
+	 */
+	private cachedModels: BedrockCatalogEntry[] = [];
 
 	/** Transcript_Note I/O 래퍼. */
 	noteStore!: NoteStore;
@@ -151,6 +175,7 @@ export default class TranscribePlugin extends Plugin {
 					},
 				}),
 		);
+		this.modelCatalog = new BedrockModelCatalog();
 		// AudioWorklet 소스는 번들에 문자열로 인라인되어 있다(esbuild workletTextPlugin).
 		// `AudioCapture` 가 이 소스로 Blob URL 을 생성해 audioWorklet.addModule 에 전달한다.
 		// 별도 리소스 파일 배포가 불필요하며, Obsidian 의 `app://` 리소스 URL 에서 발생하는
@@ -302,6 +327,127 @@ export default class TranscribePlugin extends Plugin {
 			hasCredentials: this.hasAwsCredentials(),
 			hasBedrockModel: this.settings.bedrockModelId.trim().length > 0,
 		};
+	}
+
+	// ─ 사이드바 인라인 컨트롤(언어/모델 빠른 선택) 핸들러 ───────────
+
+	/** 현재 설정에 저장된 전사 언어 코드. */
+	getCurrentLanguage(): LanguageCode {
+		return this.settings.languageCode;
+	}
+
+	/** 현재 설정에 저장된 Bedrock 모델 ID. */
+	getCurrentModelId(): string {
+		return this.settings.bedrockModelId;
+	}
+
+	/**
+	 * 전사 언어를 즉시 변경하고 저장한다.
+	 *
+	 * 스트리밍 중 변경은 허용되지만, 다음 세션부터 적용된다(현재 세션의 AWS Transcribe
+	 * 파라미터는 세션 생성 시 고정되므로 재시작이 필요하다). 필요 시 사용자에게 안내한다.
+	 */
+	async setLanguage(code: LanguageCode): Promise<void> {
+		if (this.settings.languageCode === code) return;
+		this.settings.languageCode = code;
+		await this.persistSettings();
+		if (this.state.getState() === "streaming") {
+			new Notice(this.t.notices.singleSessionActive, NOTICE_DURATION_MS);
+		}
+		// 열린 설정 탭을 최신 값으로 재렌더해 UI 불일치를 피한다.
+		this.rerenderOpenSettingTab();
+	}
+
+	/**
+	 * Bedrock 분석 모델 ID 를 즉시 변경하고 저장한다.
+	 *
+	 * 설정 탭/사이드바 어느 쪽에서 변경하든 동일한 경로를 타도록 한다.
+	 */
+	async setModelId(modelId: string): Promise<void> {
+		if (this.settings.bedrockModelId === modelId) return;
+		this.settings.bedrockModelId = modelId;
+		await this.persistSettings();
+		this.rerenderOpenSettingTab();
+		// 모델 입력이 생기면 분석 버튼 활성 조건이 바뀌므로 재계산.
+		this.refreshSidebarButtons();
+	}
+
+	/** 현재 메모리에 캐시된 Bedrock 모델 카탈로그. */
+	getAvailableModels(): BedrockCatalogEntry[] {
+		return this.cachedModels;
+	}
+
+	/**
+	 * AWS Bedrock 카탈로그를 재조회해 캐시를 갱신한다.
+	 *
+	 * 자격 증명/리전이 누락되면 Notice 로 안내하고 빈 배열을 반환한다(throw 는 하지 않는다 —
+	 * 사용자가 자격 증명을 넣는 중 빈번히 호출될 수 있으므로). AWS 호출 실패는 code 별
+	 * Notice 로 분기한 뒤 다시 throw 하여 호출자(설정 탭/사이드바)가 로딩 상태를 해제할 수 있게 한다.
+	 */
+	async refreshAvailableModels(): Promise<BedrockCatalogEntry[]> {
+		const missing = this.collectMissingStreamingFields();
+		if (missing.length > 0) {
+			new Notice(
+				this.t.notices.missingSettings(missing),
+				NOTICE_DURATION_MS,
+			);
+			return this.cachedModels;
+		}
+		try {
+			const models = await this.modelCatalog.listInvokableModels({
+				credentials: this.currentCredentials(),
+				region: this.settings.region,
+			});
+			this.cachedModels = models;
+			this.rerenderOpenSettingTab();
+			return models;
+		} catch (err) {
+			if (err instanceof TranscribeError && err.code === "AWS_AUTH") {
+				new Notice(this.t.notices.awsAuthError, NOTICE_DURATION_MS);
+			} else {
+				console.error(
+					"[TranscribePlugin] refreshAvailableModels failed:",
+					err,
+				);
+				new Notice(this.t.notices.awsNetworkError, NOTICE_DURATION_MS);
+			}
+			throw err;
+		}
+	}
+
+	/**
+	 * 설정을 저장하되 실패 시 Notice 만 띄우고 조용히 넘어간다(사이드바 경로에서는
+	 * 저장 실패가 연쇄 UI 중단으로 이어지지 않도록 함).
+	 */
+	private async persistSettings(): Promise<void> {
+		try {
+			await this.settingsStore.save(this.settings);
+		} catch (err) {
+			console.error("[TranscribePlugin] persistSettings failed:", err);
+			new Notice(this.t.notices.settingsSaveFailed, NOTICE_DURATION_MS);
+		}
+	}
+
+	/**
+	 * 열려 있는 설정 탭이 있다면 재렌더해서 사이드바에서 바꾼 값이 탭에도 반영되도록 한다.
+	 *
+	 * Obsidian 의 설정 UI 가 열려 있지 않을 수도 있으므로 실패해도 무시한다.
+	 */
+	private rerenderOpenSettingTab(): void {
+		try {
+			const setting = (this.app as unknown as {
+				setting?: { activeTab?: { display?: () => void } };
+			}).setting;
+			const tab = setting?.activeTab;
+			if (tab && tab instanceof TranscribeSettingTab) {
+				tab.display();
+			}
+		} catch (err) {
+			console.error(
+				"[TranscribePlugin] rerenderOpenSettingTab failed:",
+				err,
+			);
+		}
 	}
 
 	/**

@@ -182,6 +182,7 @@ describe("TranscribeSettingTab.display — 렌더 예시", () => {
 			T.settings.awsHeading, // "AWS credentials"
 			T.settings.transcriptionHeading, // "Transcription"
 			T.settings.analysisHeading, // "Analysis"
+			T.settings.vocabularyHeading, // "Vocabulary"
 			T.settings.aboutHeading, // "About"
 		]);
 
