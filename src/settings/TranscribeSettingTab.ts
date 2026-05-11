@@ -85,12 +85,6 @@ const MAX_SECRET_ACCESS_KEY_LENGTH = 256;
 const MAX_BEDROCK_MODEL_ID_LENGTH = 256;
 
 /**
- * 드롭다운에서 "저장된 값을 유지" 를 의미하는 sentinel value.
- * 이 값이 선택되면 실제 `settings.bedrockModelId` 는 변경되지 않는다.
- */
-const CUSTOM_SENTINEL = "__custom__";
-
-/**
  * AWS 리전 드롭다운에 표시할 일반 리전 목록.
  *
  * AWS Transcribe Streaming과 Bedrock Runtime 양쪽에서 가용한 대표 리전만 포함한다.
@@ -436,8 +430,7 @@ export class TranscribeSettingTab extends PluginSettingTab {
 			this.populateModelDropdown(dd.selectEl, t);
 			dd.selectEl.addEventListener("change", async () => {
 				const value = dd.selectEl.value;
-				// "__custom__" sentinel 은 저장된 값을 그대로 유지한다는 의미이므로 덮어쓰지 않는다.
-				if (value === CUSTOM_SENTINEL) {
+				if (value.length === 0) {
 					return;
 				}
 				this.transcribePlugin.settings.bedrockModelId = value;
@@ -462,8 +455,9 @@ export class TranscribeSettingTab extends PluginSettingTab {
 	/**
 	 * 드롭다운 옵션 목록을 `cachedModels` 기준으로 구성한다.
 	 *
-	 * 저장된 값이 목록에 없으면 맨 위에 `CUSTOM_SENTINEL` 옵션을 추가해
-	 * "기존 저장 값을 선택된 상태처럼" 보여준다. 이 옵션 선택 시 값은 바뀌지 않는다.
+	 * 저장된 값이 목록에 없으면 맨 위에 해당 값을 직접 옵션으로 추가해
+	 * 새로고침 없이도 마지막에 사용한 모델이 선택된 상태로 보이도록 한다.
+	 * 이 옵션을 선택해도 값은 변경되지 않는다(이미 저장된 값이므로).
 	 */
 	private populateModelDropdown(
 		selectEl: HTMLSelectElement,
@@ -474,13 +468,14 @@ export class TranscribeSettingTab extends PluginSettingTab {
 		const current = this.transcribePlugin.settings.bedrockModelId.trim();
 		const known = new Set(this.cachedModels.map((m) => m.id));
 
-		// 저장된 값이 카탈로그에 없으면 "직접 입력" 항목으로 유지한다.
+		// 저장된 값이 카탈로그에 없으면 해당 값을 직접 옵션으로 추가한다.
+		// 새로고침 전에도 마지막 사용 모델이 드롭다운에 표시되어 즉시 사용 가능.
 		if (current.length > 0 && !known.has(current)) {
-			const customOpt = selectEl.createEl("option", {
-				value: CUSTOM_SENTINEL,
-				text: `${t.settings.bedrockModelId.custom} — ${current}`,
+			const opt = selectEl.createEl("option", {
+				value: current,
+				text: current,
 			});
-			customOpt.selected = true;
+			opt.selected = true;
 		}
 
 		// 제공자별로 optgroup 으로 묶어 표시하면 사용자가 찾기 편하다.

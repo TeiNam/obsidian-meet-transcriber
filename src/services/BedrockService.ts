@@ -165,12 +165,12 @@ function buildPrompt(
 	glossary?: string,
 ): string {
 	const instruction = PROMPT_BY_LOCALE[locale];
-	const trimmedGlossary = glossary?.trim() ?? "";
-	const glossaryBlock =
-		trimmedGlossary.length > 0
-			? `\n\n--- glossary start ---\n${trimmedGlossary}\n--- glossary end ---`
+	const trimmedCustom = glossary?.trim() ?? "";
+	const customBlock =
+		trimmedCustom.length > 0
+			? `\n\n--- additional instructions ---\n${trimmedCustom}\n--- end additional instructions ---`
 			: "";
-	return `${instruction}${glossaryBlock}\n\n--- transcript start ---\n${transcript}\n--- transcript end ---`;
+	return `${instruction}${customBlock}\n\n--- transcript start ---\n${transcript}\n--- transcript end ---`;
 }
 
 /**

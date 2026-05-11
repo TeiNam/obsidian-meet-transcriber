@@ -93,11 +93,11 @@ export const en = {
             desc: "Name of a custom vocabulary registered in AWS Transcribe for the selected region and language. Leave empty to disable. Create vocabularies in the AWS Console under Transcribe → Custom vocabularies.",
             placeholder: "my-team-vocab",
         },
-        // Glossary 섹션 (B) — 분석 프롬프트에 삽입되는 용어 사전
+        // Glossary 섹션 (B) — 분석 프롬프트에 삽입되는 사용자 지시
         analysisGlossary: {
-            name: "Analysis glossary",
-            desc: "Terms and acronyms that the analysis model should expand. One entry per line in the form `term: definition`. Included in the analysis prompt when present.",
-            placeholder: "KPI: Key Performance Indicator\nOKR: Objectives and Key Results",
+            name: "Custom analysis prompt",
+            desc: "Additional instructions for the analysis model. Write freely — for example, ask it to focus on certain topics, use a specific format, or explain domain-specific terms. Included before the transcript when present.",
+            placeholder: "Focus on budget-related decisions.\nKPI = Key Performance Indicator",
         },
         // About 섹션 — 보안 고지 (Requirement 2.13)
         aboutHeading: "About",

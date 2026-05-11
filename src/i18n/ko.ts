@@ -95,11 +95,11 @@ export const ko: Translations = {
             desc: "선택된 리전과 언어에 맞춰 AWS Transcribe 에 등록해 둔 커스텀 어휘 이름을 입력합니다. 비워 두면 비활성화됩니다. AWS 콘솔의 Transcribe → 사용자 지정 어휘에서 미리 등록하세요.",
             placeholder: "my-team-vocab",
         },
-        // Glossary 섹션 (B) — 분석 프롬프트에 삽입되는 용어 사전
+        // Glossary 섹션 (B) — 분석 프롬프트에 삽입되는 사용자 지시
         analysisGlossary: {
-            name: "분석 용어 사전",
-            desc: "분석 모델이 참고할 용어와 약어 정의입니다. 한 줄에 하나씩 `용어: 설명` 형태로 작성하세요. 값이 있으면 분석 프롬프트에 용어집 섹션으로 삽입됩니다.",
-            placeholder: "KPI: Key Performance Indicator (핵심 성과 지표)\nOKR: Objectives and Key Results (목표 및 핵심 결과)",
+            name: "분석 추가 지시",
+            desc: "분석 모델에 전달할 추가 지시사항입니다. 자유롭게 작성하세요 — 특정 주제에 집중하거나, 형식을 지정하거나, 도메인 용어를 설명할 수 있습니다. 값이 있으면 전사 본문 앞에 삽입됩니다.",
+            placeholder: "예산 관련 결정 사항에 집중해 주세요.\nKPI = 핵심 성과 지표",
         },
         // About 섹션 — 보안 고지 (Requirement 2.13)
         aboutHeading: "정보",
