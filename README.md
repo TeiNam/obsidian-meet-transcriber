@@ -1,4 +1,4 @@
-# Transcribe — Obsidian plugin for real-time speech-to-text via AWS
+# Meeting Transcriber — Obsidian plugin for real-time speech-to-text via AWS
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.4-blue.svg)
 ![AWS](https://img.shields.io/badge/AWS-Cloud-FF9900.svg)
@@ -55,6 +55,7 @@ Obsidian 사이드바에서 마이크 오디오를 실시간으로 AWS Transcrib
 - **최근 전사 5개 리스트** — 사이드바 하단에 표시, 클릭하면 즉시 로드·편집·분석 가능
 - 저장된 노트의 직접 편집(후보정) 지원
 - AWS Bedrock 을 통한 요약·키워드·**체크박스 형식 액션 아이템** 분석 결과 노트에 부착
+- **사이드바 인라인 컨트롤** — 전사 언어와 Bedrock 모델을 설정 탭을 거치지 않고 사이드바에서 즉시 선택
 - **Bedrock 모델 드롭다운** — 새로고침 버튼으로 사용 가능한 모델/추론 프로필 자동 조회
 - **커스텀 단어장 자동 동기화** — 설정에서 단어 입력 후 동기화 버튼으로 AWS Transcribe에 자동 등록
 - **커스텀 분석 프롬프트** — 자유 텍스트로 AI 분석에 추가 지시 전달
@@ -150,21 +151,22 @@ Transcribe Streaming 과 Bedrock 이 **동일 리전에서 모두 지원**되는
 | AWS credentials | AWS access key ID | IAM 사용자의 access key ID (최대 128자) |
 | | AWS secret access key | IAM 사용자의 secret access key (최대 256자, 입력은 마스킹 표시) |
 | | AWS region | Transcribe 및 Bedrock 호출 리전 (기본값 `us-east-1`) |
-| Transcription | Transcription language | 전사 언어 코드 (`ko-KR` 또는 `en-US`) |
+| Transcription | Transcription language | 전사 언어 코드 (`ko-KR` 또는 `en-US`). 사이드바에서도 즉시 변경 가능 |
 | | Transcript folder | 전사 노트를 저장할 vault 내 폴더 경로. 빈 값이면 vault 루트 사용. vault 폴더 자동완성 제공 |
-| Analysis | Bedrock model ID | 드롭다운에서 선택하거나 직접 입력. 새로고침 버튼으로 AWS에서 사용 가능한 모델 자동 조회 |
+| Analysis | Bedrock model ID | 드롭다운에서 선택하거나 직접 입력. 새로고침 버튼으로 AWS에서 사용 가능한 모델 자동 조회. 사이드바에서도 즉시 변경 가능 |
 | | 분석 추가 지시 | 분석 모델에 전달할 추가 지시사항 (자유 텍스트) |
 | Vocabulary | 커스텀 단어 목록 | AWS Transcribe가 인식할 단어 목록. 한 줄에 하나. 'AWS에 동기화' 버튼으로 등록 |
 
 ### 사용 방법
 
 1. 명령 팔레트 또는 리본 아이콘의 `Open transcribe view` 명령으로 사이드바를 엽니다.
-2. **Start streaming** 버튼을 눌러 마이크 권한을 허용합니다.
-3. 발화를 시작하면 잠정(희미한 글씨) → 확정(일반 글씨) 순으로 텍스트가 누적됩니다. 빨간 펄스 인디케이터가 녹음 중임을 표시합니다.
-4. **Stop streaming** (빨간 버튼)을 누르면 누적된 내용이 `YYYY-MM-DD HH-mm.md` 로 저장됩니다.
-5. 전사 보드에서 텍스트를 드래그해 선택하거나, 우상단 📋 아이콘으로 전체 복사할 수 있습니다.
-6. **Edit** 버튼으로 오탈자를 교정하거나, **Analyze** 버튼으로 Bedrock 분석 결과(요약, 키워드, 결정사항, 액션 아이템, 참고사항 섹션의 회의록 형식)를 노트 끝에 추가합니다.
-7. 하단 **최근 전사** 리스트에서 이전 노트를 클릭하면 즉시 로드되어 편집·복사·분석이 가능합니다.
+2. 사이드바 상단의 인라인 드롭다운에서 **전사 언어** 와 **Bedrock 모델** 을 선택합니다. 설정 탭에 저장한 값이 그대로 반영되며, 사이드바에서 바꾸면 설정 탭에도 즉시 동기화됩니다.
+3. **Start streaming** 버튼을 눌러 마이크 권한을 허용합니다.
+4. 발화를 시작하면 잠정(희미한 글씨) → 확정(일반 글씨) 순으로 텍스트가 누적됩니다. 빨간 펄스 인디케이터가 녹음 중임을 표시합니다.
+5. **Stop streaming** (빨간 버튼) 을 누르면 누적된 내용이 `YYYY-MM-DD HH-mm.md` 로 저장됩니다.
+6. 전사 보드에서 텍스트를 드래그해 선택하거나, 우상단 📋 아이콘으로 전체 복사할 수 있습니다.
+7. **Edit** 버튼으로 오탈자를 교정하거나, **Analyze** 버튼으로 Bedrock 분석 결과(요약, 키워드, 결정사항, 액션 아이템, 참고사항 섹션의 회의록 형식)를 노트 끝에 추가합니다.
+8. 하단 **최근 전사** 리스트에서 이전 노트를 클릭하면 즉시 로드되어 편집·복사·분석이 가능합니다.
 
 ### 보안 권장 사항
 
@@ -219,6 +221,7 @@ Before installing or using this plugin, you must understand and agree to the fol
 - **Recent transcripts list** (5 items) at the bottom of the sidebar — click to load, edit, or analyze
 - Post-edit the saved transcript directly from the sidebar
 - Append AWS Bedrock analysis (summary, keywords, **checkbox-style action items**) to the note
+- **Sidebar inline controls** — pick transcription language and Bedrock model directly in the sidebar, no need to open Settings
 - **Bedrock model dropdown** — refresh button auto-discovers available models and inference profiles
 - **Custom vocabulary auto-sync** — enter words in settings, click sync to automatically register with AWS Transcribe
 - **Custom analysis prompt** — add free-form instructions to guide the AI analysis
@@ -314,21 +317,22 @@ Configure the following under `Settings → Community plugins → Transcribe →
 | AWS credentials | AWS access key ID | IAM access key ID (max 128 chars) |
 | | AWS secret access key | IAM secret access key (max 256 chars, masked input) |
 | | AWS region | Region used for Transcribe and Bedrock (default `us-east-1`) |
-| Transcription | Transcription language | Transcription language code (`ko-KR` or `en-US`) |
+| Transcription | Transcription language | Transcription language code (`ko-KR` or `en-US`). Also switchable from the sidebar |
 | | Transcript folder | Folder path inside the vault where transcripts are saved. Empty means vault root. Vault folder autocompletion provided. |
-| Analysis | Bedrock model ID | Select from dropdown or keep custom value. Refresh button auto-discovers models from AWS. |
+| Analysis | Bedrock model ID | Select from dropdown or keep custom value. Refresh button auto-discovers models from AWS. Also switchable from the sidebar |
 | | Custom analysis prompt | Additional instructions for the analysis model (free-form text) |
 | Vocabulary | Custom vocabulary words | Words for AWS Transcribe to recognize. One per line. Click 'Sync to AWS' to register. |
 
 ### Usage
 
 1. Open the sidebar via the `Open transcribe view` command or the ribbon icon.
-2. Click **Start streaming** and grant microphone permission.
-3. As you speak, partial results appear in a muted style and are replaced by final results. A red pulsing indicator shows recording is active.
-4. Click **Stop streaming** (red button) to save the transcript as `YYYY-MM-DD HH-mm.md`.
-5. Drag-select text on the transcript board, or click the 📋 icon in the top-right corner to copy all.
-6. Use **Edit** to correct errors, or **Analyze** to append Bedrock-generated meeting minutes (Summary, Keywords, Decisions, Action items, and Notes sections).
-7. Click any item in the **Recent transcripts** list at the bottom to instantly load a previous note for editing, copying, or analysis.
+2. At the top of the sidebar, use the inline dropdowns to pick the **transcription language** and the **Bedrock model**. These reflect the values saved in Settings and stay in sync both ways — changes in the sidebar update the settings tab and vice versa.
+3. Click **Start streaming** and grant microphone permission.
+4. As you speak, partial results appear in a muted style and are replaced by final results. A red pulsing indicator shows recording is active.
+5. Click **Stop streaming** (red button) to save the transcript as `YYYY-MM-DD HH-mm.md`.
+6. Drag-select text on the transcript board, or click the 📋 icon in the top-right corner to copy all.
+7. Use **Edit** to correct errors, or **Analyze** to append Bedrock-generated meeting minutes (Summary, Keywords, Decisions, Action items, and Notes sections).
+8. Click any item in the **Recent transcripts** list at the bottom to instantly load a previous note for editing, copying, or analysis.
 
 ### Security recommendations
 
