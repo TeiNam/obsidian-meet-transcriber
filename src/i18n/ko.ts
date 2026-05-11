@@ -93,7 +93,7 @@ export const ko: Translations = {
         transcribeVocabularyName: {
             name: "커스텀 단어 목록",
             desc: "AWS Transcribe 가 정확히 인식해야 할 단어와 구문입니다. 한 줄에 하나씩 입력하세요. 'AWS에 동기화' 버튼을 누르면 Custom Vocabulary 로 등록됩니다.",
-            placeholder: "쿠버네티스\nObsidian\n김철수 팀장",
+            placeholder: "예시)\n쿠버네티스\nObsidian\n김철수 팀장",
             sync: "AWS에 동기화",
             syncing: "동기화 중...",
             syncSuccess: "단어장이 동기화되었습니다. 다음 전사부터 적용됩니다.",
@@ -105,7 +105,7 @@ export const ko: Translations = {
         analysisGlossary: {
             name: "분석 추가 지시",
             desc: "분석 모델에 전달할 추가 지시사항입니다. 자유롭게 작성하세요 — 특정 주제에 집중하거나, 형식을 지정하거나, 도메인 용어를 설명할 수 있습니다. 값이 있으면 전사 본문 앞에 삽입됩니다.",
-            placeholder: "예산 관련 결정 사항에 집중해 주세요.\nKPI = 핵심 성과 지표",
+            placeholder: "예시)\n예산 관련 결정 사항에 집중해 주세요.\nKPI = 핵심 성과 지표",
         },
         // About 섹션 — 보안 고지 (Requirement 2.13)
         aboutHeading: "정보",

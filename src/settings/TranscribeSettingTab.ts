@@ -426,9 +426,9 @@ export class TranscribeSettingTab extends PluginSettingTab {
 		});
 		if (this.modelsLoading) {
 			statusEl.setText(t.settings.bedrockModelId.loading);
-		} else if (this.cachedModels.length === 0) {
-			statusEl.setText(t.settings.bedrockModelId.empty);
 		}
+		// 저장된 모델이 있으면 빈 상태 메시지를 표시하지 않는다 — 앱 시작 직후에도
+		// 마지막 사용 모델이 드롭다운에 보이므로 "모델이 없습니다"는 혼란을 줄 수 있다.
 
 		let selectEl: HTMLSelectElement | null = null;
 		let refreshBtnEl: HTMLElement | null = null;

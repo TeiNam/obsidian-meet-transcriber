@@ -91,7 +91,7 @@ export const en = {
         transcribeVocabularyName: {
             name: "Custom vocabulary words",
             desc: "Words and phrases that AWS Transcribe should recognize accurately. One per line. Click 'Sync to AWS' to register them as a Custom Vocabulary.",
-            placeholder: "Kubernetes\nObsidian\nJohn Smith",
+            placeholder: "e.g.\nKubernetes\nObsidian\nJohn Smith",
             sync: "Sync to AWS",
             syncing: "Syncing...",
             syncSuccess: "Vocabulary synced successfully. It will be used on next transcription.",
@@ -103,7 +103,7 @@ export const en = {
         analysisGlossary: {
             name: "Custom analysis prompt",
             desc: "Additional instructions for the analysis model. Write freely — for example, ask it to focus on certain topics, use a specific format, or explain domain-specific terms. Included before the transcript when present.",
-            placeholder: "Focus on budget-related decisions.\nKPI = Key Performance Indicator",
+            placeholder: "e.g.\nFocus on budget-related decisions.\nKPI = Key Performance Indicator",
         },
         // About 섹션 — 보안 고지 (Requirement 2.13)
         aboutHeading: "About",
