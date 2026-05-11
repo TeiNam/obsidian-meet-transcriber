@@ -29,15 +29,32 @@ import type { SupportedLocale } from "../i18n";
 /**
  * 본문 길이 한계. 초과 시 요청을 개시하지 않는다(Requirements 6.5).
  *
- * design.md §7 "본문 길이 100,000자 초과" 조건을 단일 상수로 추출하여,
+ * design.md §7 "본문 길이 초과" 조건을 단일 상수로 추출하여,
  * 속성 테스트(Property 10)와 동일한 경계를 참조하도록 한다.
+ *
+ * ## 값의 근거
+ * Claude 4.5 계열 모델의 컨텍스트 윈도우는 200K 토큰이다. 한국어 기준
+ * 1 토큰 ≈ 2~4자, 영어 기준 1 토큰 ≈ 4자 이므로 200,000자는 대체로
+ * 50K~100K 토큰 수준으로 컨텍스트에 안전하게 들어간다.
+ *
+ * 시간 환산: 1시간당 약 15~25K자 누적되므로 200K자는 **약 8~12시간 회의** 에 해당한다.
+ * 그 이상은 분할 요약 전략이 필요하므로 현재 한계로 적절하다.
+ *
+ * 제한을 두는 이유:
+ * - 과도한 입력 토큰에 따른 Bedrock 비용 폭증 방지
+ * - 30초 요청 타임아웃 내 모델 응답을 받기 위한 상한
+ * - AWS 400 ValidationException 전에 UI 에서 친절한 Notice 로 차단
  */
-const MAX_TRANSCRIPT_LENGTH = 100_000;
+const MAX_TRANSCRIPT_LENGTH = 200_000;
 
 /**
- * 분석 요청 기본 타임아웃(밀리초). Requirements 6.11의 "30초" 기준.
+ * 분석 요청 기본 타임아웃(밀리초). Requirements 6.11 기준으로 정한다.
+ *
+ * 200,000자에 가까운 대용량 본문을 Claude 4.5 계열 모델에 요청할 때 응답까지
+ * 20~40초가 걸릴 수 있으므로 여유 있게 60초로 설정한다. 짧은 본문의 경우에도
+ * 네트워크 지연을 포함한 안전 마진 역할을 한다.
  */
-const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_TIMEOUT_MS = 60_000;
 
 /**
  * Claude 3 계열 요청 본문의 `max_tokens` 값.
@@ -68,12 +85,22 @@ export interface AnalyzeParams {
 	region: string;
 	/** 호출할 파운데이션 모델 식별자(예: `"anthropic.claude-3-sonnet-20240229-v1:0"`). */
 	modelId: string;
-	/** 분석 대상 전사 본문. 길이 100,000자 초과 시 `TRANSCRIPT_TOO_LONG`. */
+	/** 분석 대상 전사 본문. 길이 제한(MAX_TRANSCRIPT_LENGTH) 초과 시 `TRANSCRIPT_TOO_LONG`. */
 	transcript: string;
 	/** 요청 타임아웃(밀리초). 생략 시 `DEFAULT_TIMEOUT_MS` 사용(Requirements 6.11). */
 	timeoutMs?: number;
 	/** 분석 프롬프트 언어를 결정하는 UI 로케일(영어/한국어). */
 	locale: SupportedLocale;
+	/**
+	 * 분석 모델에 전달할 용어 사전(선택).
+	 *
+	 * 사용자가 설정에 입력한 원본 문자열(한 줄에 `용어: 설명`)을 그대로 받는다.
+	 * 빈 문자열/`undefined` 면 프롬프트에 용어집 섹션을 추가하지 않는다. 값이 있으면
+	 * 프롬프트 상단에 "Glossary" 섹션으로 삽입되어 모델이 약어/은어를 풀어 요약한다.
+	 *
+	 * 형식 검증은 하지 않는다(관대한 파싱). 모델이 자연어로 해석하므로 엄격할 필요가 없다.
+	 */
+	glossary?: string;
 }
 
 /**
@@ -92,25 +119,58 @@ export type BedrockClientFactory = (
  *
  * design.md §7 "분석 프롬프트(locale별)"에서 확정된 고정 문자열을 사용한다.
  * 수정 시 설계 문서와 동기화되어야 한다(요약 품질 영향 요인).
+ *
+ * 구조:
+ *   (1) 핵심 요약 — 3~5 문장
+ *   (2) 주요 키워드 — 5~10 개
+ *   (3) 실행 항목(action items) — 반드시 Markdown **체크박스(`- [ ]`)** 형식으로 반환.
+ *       Obsidian 에서 그대로 할 일 목록으로 체크할 수 있도록 한다. 항목이 없으면
+ *       해당 섹션 자체를 생략한다.
  */
 const PROMPT_BY_LOCALE: Record<SupportedLocale, string> = {
 	en:
-		"The following is a meeting/lecture transcript. Summarize in concise markdown: " +
-		"(1) key summary (3-5 sentences), (2) main keywords (5-10), (3) action items (if any).",
+		"The following is a meeting/lecture transcript. Summarize in concise markdown with exactly these three sections in order:\n" +
+		"## Summary\n" +
+		"3-5 sentences capturing the key points.\n\n" +
+		"## Keywords\n" +
+		"5-10 main keywords as a comma-separated list or bullet points.\n\n" +
+		"## Action items\n" +
+		"Every action item MUST be a GitHub-style markdown task list checkbox, starting with `- [ ] `. " +
+		"Include an owner and due date in parentheses when they are mentioned in the transcript. " +
+		"If there are no action items, omit this section entirely.",
 	ko:
-		"다음은 회의/강의 전사 내용입니다. 간결한 마크다운으로 정리해 주세요: " +
-		"(1) 핵심 요약(3~5문장), (2) 주요 키워드(5~10개), (3) 실행 항목(있다면).",
+		"다음은 회의/강의 전사 내용입니다. 아래 세 섹션 순서대로 간결한 마크다운으로 정리해 주세요:\n" +
+		"## 요약\n" +
+		"핵심을 담은 3~5문장.\n\n" +
+		"## 키워드\n" +
+		"주요 키워드 5~10개를 쉼표 구분 또는 불릿으로.\n\n" +
+		"## 실행 항목\n" +
+		"실행 항목은 반드시 GitHub 스타일 마크다운 체크박스(`- [ ] `)로 작성합니다. " +
+		"전사에 담당자나 마감일이 언급되면 괄호로 덧붙여 주세요. " +
+		"실행 항목이 없다면 이 섹션 자체를 생략합니다.",
 };
 
 /**
- * 주어진 locale과 전사 본문을 결합해 Claude 3에 전달할 user 메시지를 구성한다.
+ * 주어진 locale 과 전사 본문(+ 선택적 용어 사전) 을 결합해 Claude 3 에 전달할 user 메시지를 구성한다.
  *
  * 구분선(`--- transcript start ---`, `--- transcript end ---`)은 모델이 지시문과
  * 전사 본문을 명확히 구분하도록 돕는다(design.md §7).
+ *
+ * 용어 사전(glossary)이 주어지면 "--- glossary start ---" 블록으로 프롬프트에 먼저 삽입한다.
+ * 모델은 이 정의를 참고해 약어/은어를 풀어 요약에 사용한다.
  */
-function buildPrompt(locale: SupportedLocale, transcript: string): string {
+function buildPrompt(
+	locale: SupportedLocale,
+	transcript: string,
+	glossary?: string,
+): string {
 	const instruction = PROMPT_BY_LOCALE[locale];
-	return `${instruction}\n\n--- transcript start ---\n${transcript}\n--- transcript end ---`;
+	const trimmedGlossary = glossary?.trim() ?? "";
+	const glossaryBlock =
+		trimmedGlossary.length > 0
+			? `\n\n--- glossary start ---\n${trimmedGlossary}\n--- glossary end ---`
+			: "";
+	return `${instruction}${glossaryBlock}\n\n--- transcript start ---\n${transcript}\n--- transcript end ---`;
 }
 
 /**
@@ -216,6 +276,7 @@ export class BedrockService {
 			transcript,
 			timeoutMs = DEFAULT_TIMEOUT_MS,
 			locale,
+			glossary,
 		} = params;
 
 		// 1) 사전 길이 검증: SDK 호출 전에 즉시 차단한다(Requirements 6.5, Property 10).
@@ -237,7 +298,7 @@ export class BedrockService {
 			messages: [
 				{
 					role: "user",
-					content: buildPrompt(locale, transcript),
+					content: buildPrompt(locale, transcript, glossary),
 				},
 			],
 		});

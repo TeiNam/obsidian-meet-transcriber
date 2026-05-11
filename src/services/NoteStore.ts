@@ -63,12 +63,20 @@ export interface TranscriptNoteMeta {
 /**
  * 파일명 앞부분에 사용되는 접두어.
  *
- * 최종 파일명 형식: `<prefix>-YYYYMMDD-HHmmss.md`
- * 충돌 시: `<prefix>-YYYYMMDD-HHmmss-N.md` (N은 1부터 시작하는 정수).
+ * 과거에는 `Transcribe-YYYYMMDD-HHmmss.md` 를 사용했으나, UI 상 "최근 전사" 리스트에서
+ * 접두어가 화면을 잡아먹어 가독성이 떨어져 제거했다(2025-11 변경). 현재 최종 파일명 형식:
+ *
+ *   `YYYY-MM-DD HH-mm.md`
+ *
+ * 충돌 시 `YYYY-MM-DD HH-mm-N.md` (N은 1부터 시작하는 정수) 로 회피한다.
+ *
+ * 주의: 파일명에 콜론(`:`) 을 사용할 수 없으므로 `HH-mm` 형태로 표기한다(Windows 는
+ * 콜론을 예약 문자로 금지하며, macOS Finder 도 표시를 변환한다). 초 단위는 사이드바
+ * 리스트의 가독성을 위해 생략했으며, 같은 분 내 중복은 충돌 회피 suffix 로 해결된다.
  *
  * Requirements 4.4.
  */
-const TRANSCRIPT_FILENAME_PREFIX = "Transcribe";
+const TRANSCRIPT_FILENAME_PREFIX = "";
 
 /** `.md` 확장자. 파일명 조립과 충돌 검사의 일관성 유지용 상수. */
 const MARKDOWN_EXTENSION = ".md";
@@ -210,8 +218,12 @@ export class NoteStore {
 
 		const resolvedFolder = await this.ensureFolder(folder, fallbackNoticeMessage);
 
-		// 파일명 본체 생성 (Requirements 4.4 — `Transcribe-YYYYMMDD-HHmmss`).
-		const base = `${TRANSCRIPT_FILENAME_PREFIX}-${formatLocalTimestamp(now)}`;
+		// 파일명 본체 생성 (Requirements 4.4 — `YYYY-MM-DD HH-mm`).
+		// 접두사는 제거했으므로 prefix 가 있는 경우에만 하이픈을 붙인다.
+		const timestamp = formatLocalTimestamp(now);
+		const base = TRANSCRIPT_FILENAME_PREFIX.length > 0
+			? `${TRANSCRIPT_FILENAME_PREFIX}-${timestamp}`
+			: timestamp;
 
 		// 충돌 검사용 기존 파일명 집합을 수집.
 		const existing = this.collectExistingFilenames(resolvedFolder);
@@ -327,6 +339,37 @@ export class NoteStore {
 			message ?? "Could not create the transcript folder. Saving to the vault root instead.",
 		);
 	}
+
+	/**
+	 * 지정 폴더(서브폴더 제외)의 마크다운 파일을 수정 시각 내림차순으로 최대 `limit` 개 조회한다.
+	 *
+	 * 사이드바의 "최근 전사" 리스트 구성에 사용한다. 본문을 읽지 않고 `TFile` 메타데이터만
+	 * 참조하므로 비용이 거의 없다.
+	 *
+	 * @param folderPath - 전사 폴더 경로. 빈 문자열이면 vault 루트를 대상으로 한다.
+	 *   `normalizePath` 로 정규화된 경로를 기대한다(호출 측에서 정규화하지 않더라도 내부에서 한 번 더 수행).
+	 * @param limit - 최대 반환 개수. 기본 5.
+	 * @returns 수정 시각(mtime) 내림차순 `TFile[]`. 폴더가 없거나 비어 있으면 빈 배열.
+	 */
+	listRecentTranscripts(folderPath: string, limit: number = 5): TFile[] {
+		const normalized = folderPath === "" ? "" : normalizePath(folderPath);
+		const folder: TFolder =
+			normalized === ""
+				? this.vault.getRoot()
+				: (() => {
+						const abs = this.vault.getAbstractFileByPath(normalized);
+						return abs instanceof TFolder ? abs : this.vault.getRoot();
+					})();
+
+		const files: TFile[] = [];
+		for (const child of folder.children) {
+			if (child instanceof TFile && child.extension === "md") {
+				files.push(child);
+			}
+		}
+		files.sort((a, b) => b.stat.mtime - a.stat.mtime);
+		return files.slice(0, Math.max(0, limit));
+	}
 }
 
 // -----------------------------------------------------------------------------
@@ -334,13 +377,19 @@ export class NoteStore {
 // -----------------------------------------------------------------------------
 
 /**
- * 로컬 타임존 기준의 `YYYYMMDD-HHmmss` 타임스탬프 문자열을 생성한다.
+ * 로컬 타임존 기준의 `YYYY-MM-DD HH-mm` 타임스탬프 문자열을 생성한다.
  *
- * Requirements 4.4에 명시된 `Transcribe-YYYYMMDD-HHmmss.md` 파일명 포맷의 시각 부분이다.
- * `Date.toISOString`은 UTC를 반환하므로 사용하지 않는다.
+ * Requirements 4.4 에 명시된 파일명 포맷의 시각 부분이다.
+ * `Date.toISOString` 은 UTC 를 반환하므로 사용하지 않는다.
+ *
+ * 분(minute) 까지만 표기하는 이유:
+ * - 사이드바 "최근 전사" 리스트에서 표시가 길지 않아야 한다.
+ * - 같은 분 내 중복은 `resolveUniqueFilename` 이 `-1`, `-2` suffix 로 회피한다.
+ *
+ * 콜론(`:`) 대신 하이픈(`-`) 을 사용해 모든 OS 에서 안전하게 파일 시스템에 저장된다.
  *
  * @param date - 기준 시각(로컬 시각으로 해석된다).
- * @returns 예: `"20250115-093000"`.
+ * @returns 예: `"2025-01-15 09-30"`.
  */
 function formatLocalTimestamp(date: Date): string {
 	const year = date.getFullYear().toString().padStart(4, "0");
@@ -348,8 +397,7 @@ function formatLocalTimestamp(date: Date): string {
 	const day = date.getDate().toString().padStart(2, "0");
 	const hour = date.getHours().toString().padStart(2, "0");
 	const minute = date.getMinutes().toString().padStart(2, "0");
-	const second = date.getSeconds().toString().padStart(2, "0");
-	return `${year}${month}${day}-${hour}${minute}${second}`;
+	return `${year}-${month}-${day} ${hour}-${minute}`;
 }
 
 /**

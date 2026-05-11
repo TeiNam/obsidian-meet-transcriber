@@ -114,6 +114,38 @@ export interface TranscribeSettings {
 	 * 저장 시 `normalizePath`로 정규화되어 Vault API에 전달된다(Requirements 9.8).
 	 */
 	transcriptFolder: string;
+
+	/**
+	 * AWS Transcribe **커스텀 어휘** 이름(선택).
+	 *
+	 * 사용자가 AWS 콘솔/CLI 로 사전에 생성한 Vocabulary 의 이름만 저장한다.
+	 * 빈 문자열이면 전달하지 않으며, 값이 있으면 Transcribe Streaming 세션 생성 시
+	 * `VocabularyName` 파라미터로 전달되어 STT 가 해당 어휘를 우선 인식한다.
+	 *
+	 * 주의:
+	 * - Vocabulary 는 지정된 AWS 리전에 생성된 것이어야 한다(리전 불일치 시 세션 실패).
+	 * - 전사 언어 코드(`languageCode`) 와 Vocabulary 의 언어가 일치해야 한다.
+	 * - 최대 길이 200 자(AWS 상한). 허용 문자는 영숫자/하이픈/언더스코어.
+	 *
+	 * 관련: AWS `StartStreamTranscription` API 의 `VocabularyName` 파라미터.
+	 */
+	transcribeVocabularyName: string;
+
+	/**
+	 * 분석 단계에서 Bedrock 모델에 전달할 **용어 사전**(선택).
+	 *
+	 * 각 항목은 `단어: 설명` 형태로 저장되어 분석 프롬프트의 "용어집" 섹션에
+	 * 자동 삽입된다. 모델은 이 정의를 참고해 약자/은어/조직 고유 용어를 풀어 요약한다.
+	 *
+	 * 예)
+	 * ```
+	 * KPI: Key Performance Indicator (핵심 성과 지표)
+	 * OKR: Objectives and Key Results (목표 및 핵심 결과)
+	 * ```
+	 *
+	 * 빈 문자열이면 프롬프트에 용어집 섹션을 삽입하지 않는다.
+	 */
+	analysisGlossary: string;
 }
 
 /**
@@ -135,4 +167,6 @@ export const DEFAULT_SETTINGS: TranscribeSettings = {
 	bedrockModelId: "",
 	languageCode: "ko-KR",
 	transcriptFolder: "",
+	transcribeVocabularyName: "",
+	analysisGlossary: "",
 };

@@ -474,6 +474,46 @@ export class ButtonComponent {
 	}
 }
 
+/**
+ * Obsidian `ExtraButtonComponent` 의 테스트용 스텁.
+ * 실제 구현은 `Setting.addExtraButton` 에서 반환되며 아이콘/툴팁/클릭 콜백을 제공한다.
+ */
+export class ExtraButtonComponent {
+	extraSettingsEl: HTMLElement;
+	private clickHandler: (() => void) | null = null;
+	private disabled = false;
+	constructor(containerEl: HTMLElement) {
+		this.extraSettingsEl = document.createElement("div");
+		this.extraSettingsEl.className = "clickable-icon extra-setting-button";
+		containerEl.appendChild(this.extraSettingsEl);
+		this.extraSettingsEl.addEventListener("click", () => {
+			if (!this.disabled) this.clickHandler?.();
+		});
+	}
+	setIcon(iconId: string): this {
+		setIcon(this.extraSettingsEl, iconId);
+		return this;
+	}
+	setTooltip(tooltip: string): this {
+		this.extraSettingsEl.setAttribute("aria-label", tooltip);
+		this.extraSettingsEl.setAttribute("title", tooltip);
+		return this;
+	}
+	setDisabled(disabled: boolean): this {
+		this.disabled = disabled;
+		if (disabled) {
+			this.extraSettingsEl.classList.add("is-disabled");
+		} else {
+			this.extraSettingsEl.classList.remove("is-disabled");
+		}
+		return this;
+	}
+	onClick(cb: () => void): this {
+		this.clickHandler = cb;
+		return this;
+	}
+}
+
 export class Setting {
 	settingEl: HTMLElement;
 	nameEl: HTMLElement;
@@ -529,6 +569,11 @@ export class Setting {
 		cb(btn);
 		return this;
 	}
+	addExtraButton(cb: (btn: ExtraButtonComponent) => void): this {
+		const btn = new ExtraButtonComponent(this.controlEl);
+		cb(btn);
+		return this;
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -559,6 +604,24 @@ export abstract class AbstractInputSuggest<T> {
 // ---------------------------------------------------------------------------
 // Notice
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Icon rendering
+// ---------------------------------------------------------------------------
+
+/**
+ * Obsidian의 `setIcon`을 흉내내는 스텁.
+ *
+ * 실제 구현은 대상 엘리먼트에 Lucide 아이콘 SVG를 삽입한다. 테스트 환경에서는
+ * DOM 구조의 존재만 관찰하는 수준이면 충분하므로, 자리 표시 SVG 하나를 삽입한다.
+ */
+export function setIcon(parent: HTMLElement, iconId: string): void {
+	parent.empty?.();
+	const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+	svg.setAttribute("data-icon", iconId);
+	svg.classList.add("svg-icon");
+	parent.appendChild(svg);
+}
 
 export class Notice {
 	noticeEl: HTMLElement;

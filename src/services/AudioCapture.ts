@@ -94,15 +94,23 @@ export class AudioCapture {
 	constructor(private readonly options: AudioCaptureOptions = {}) {}
 
 	/**
-	 * 마이크 접근 권한을 요청하고 16kHz 모노 `MediaStream` 을 반환한다.
+	 * 마이크 접근 권한을 요청하고 모노 우선 `MediaStream` 을 반환한다.
 	 *
-	 * 브라우저가 요청한 제약을 정확히 수용하지 못할 수 있으므로, 실제 샘플레이트는
-	 * `pcmChunks` 파이프라인에서 AudioWorklet 의 다운샘플링이 보정한다.
+	 * ## 제약(constraints) 전달 전략
+	 * 일부 장치/OS(특히 macOS + Chromium)는 `sampleRate` 를 엄격한 제약으로 넘기면
+	 * 실제 권한과 무관하게 `OverconstrainedError` 를 던진다. 우리는 목표 샘플레이트
+	 * 16kHz 로의 변환을 AudioWorklet 쪽에서 다운샘플링으로 수행하므로, 여기서는
+	 * 샘플레이트를 요청하지 않고 `channelCount` / `echoCancellation` 만 `ideal`
+	 * 힌트로 전달한다. `ideal` 은 브라우저가 최선을 다하되 불만족해도 실패하지 않는다.
 	 *
-	 * 에러 분기:
+	 * 그래도 `OverconstrainedError` / `NotReadableError` 등 장치측 제약 위반이 나면
+	 * 가장 관대한 `{ audio: true }` 로 한 번 더 재시도해 권한 흐름을 차단하지 않는다.
+	 * 권한 거부(`NotAllowedError` / `PermissionDeniedError`)는 fallback 없이 그대로 전파한다.
+	 *
+	 * ## 에러 분기
 	 * - `navigator.mediaDevices` 자체가 없으면 `MIC_PERMISSION_DENIED` 로 즉시 실패.
-	 * - `NotAllowedError` / `PermissionDeniedError` 는 사용자 거부로 보고 동일 코드로 래핑.
-	 * - 그 외 예외도 래핑하여 호출 측이 코드 기반으로 분기할 수 있게 한다.
+	 * - 권한 거부 → `MIC_PERMISSION_DENIED`, 메시지 "permission was denied".
+	 * - 그 외(`NotFoundError` 등) → `MIC_PERMISSION_DENIED`, 메시지에 원인 포함.
 	 *
 	 * Requirements 3.1.
 	 */
@@ -115,24 +123,67 @@ export class AudioCapture {
 			);
 		}
 
+		// 1차: 관대한 ideal 힌트. sampleRate 는 요청하지 않는다(worklet 이 다운샘플링).
 		try {
 			return await getUserMedia({
 				audio: {
-					sampleRate: TARGET_SAMPLE_RATE,
-					channelCount: 1,
-					echoCancellation: true,
+					channelCount: { ideal: 1 },
+					echoCancellation: { ideal: true },
 				},
 			});
 		} catch (err) {
 			const name = err instanceof Error ? err.name : "";
-			// NotAllowedError 와 PermissionDeniedError 는 모두 사용자/OS 의 권한 거부에 해당한다.
-			// 권한 거부 외의 원인(예: NotFoundError, OverconstrainedError) 도 사용자에게는
-			// 동일하게 "마이크 사용 불가" 로 보이므로 같은 코드로 매핑하고 message 에 원인을 남긴다.
-			const message =
-				name === "NotAllowedError" || name === "PermissionDeniedError"
-					? "Microphone permission was denied."
-					: `Failed to access microphone: ${err instanceof Error ? err.message : String(err)}`;
-			throw new TranscribeError(message, "MIC_PERMISSION_DENIED", err);
+			const message = err instanceof Error ? err.message : String(err);
+			// 원인 식별을 돕기 위해 콘솔에 에러 이름과 메시지를 명시적으로 남긴다.
+			console.error(
+				`[Transcribe] getUserMedia failed (name=${name}): ${message}`,
+			);
+
+			// 권한 거부는 fallback 해도 의미 없다 — 즉시 래핑해 던진다.
+			if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+				throw new TranscribeError(
+					"Microphone permission was denied.",
+					"MIC_PERMISSION_DENIED",
+					err,
+				);
+			}
+
+			// 2차: 장치/제약 문제로 보이는 에러는 최소 제약으로 재시도.
+			if (
+				name === "OverconstrainedError" ||
+				name === "NotReadableError" ||
+				name === "TypeError"
+			) {
+				try {
+					return await getUserMedia({ audio: true });
+				} catch (fallbackErr) {
+					const fName = fallbackErr instanceof Error ? fallbackErr.name : "";
+					const fMsg =
+						fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+					console.error(
+						`[Transcribe] getUserMedia fallback failed (name=${fName}): ${fMsg}`,
+					);
+					if (fName === "NotAllowedError" || fName === "PermissionDeniedError") {
+						throw new TranscribeError(
+							"Microphone permission was denied.",
+							"MIC_PERMISSION_DENIED",
+							fallbackErr,
+						);
+					}
+					throw new TranscribeError(
+						`Failed to access microphone: ${fMsg}`,
+						"MIC_PERMISSION_DENIED",
+						fallbackErr,
+					);
+				}
+			}
+
+			// 그 외 원인(예: NotFoundError — 장치 없음) — 래핑만 하고 던진다.
+			throw new TranscribeError(
+				`Failed to access microphone: ${message}`,
+				"MIC_PERMISSION_DENIED",
+				err,
+			);
 		}
 	}
 

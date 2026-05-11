@@ -15,6 +15,7 @@ export const en = {
         stop: "Stop streaming",
         edit: "Edit",
         analyze: "Analyze",
+        copy: "Copy",
         save: "Save",
         cancel: "Cancel",
     },
@@ -32,6 +33,14 @@ export const en = {
         analyzing: "Analyzing...",
         // 편집 모드 빈 내용 안내
         editorEmpty: "No content to edit.",
+        // 최근 전사 섹션 헤더
+        recentTranscripts: "Recent transcripts",
+        // 최근 전사 리스트에 항목이 없을 때
+        noRecentTranscripts: "No previous transcripts.",
+        // 복사 성공 Notice
+        copied: "Transcript copied to clipboard.",
+        // 복사 실패 Notice
+        copyFailed: "Failed to copy transcript to clipboard.",
     },
     settings: {
         // UI_Locale 드롭다운 (Requirement 2.2 — 설정 탭의 첫 항목)
@@ -71,7 +80,24 @@ export const en = {
         analysisHeading: "Analysis",
         bedrockModelId: {
             name: "Bedrock model ID",
-            desc: "Foundation model identifier used for analysis (for example, anthropic.claude-3-sonnet-20240229-v1:0).",
+            desc: "Foundation model or inference profile ID used for analysis. Click refresh to load available models from AWS.",
+            refresh: "Refresh model list",
+            loading: "Loading models...",
+            empty: "No models found. Check credentials and region, then click refresh.",
+            custom: "Custom (keep saved value)",
+        },
+        // Vocabulary 섹션 (A) — 전사 정확도를 높이는 AWS Transcribe 커스텀 어휘 이름
+        vocabularyHeading: "Vocabulary",
+        transcribeVocabularyName: {
+            name: "Transcribe custom vocabulary name",
+            desc: "Name of a custom vocabulary registered in AWS Transcribe for the selected region and language. Leave empty to disable. Create vocabularies in the AWS Console under Transcribe → Custom vocabularies.",
+            placeholder: "my-team-vocab",
+        },
+        // Glossary 섹션 (B) — 분석 프롬프트에 삽입되는 용어 사전
+        analysisGlossary: {
+            name: "Analysis glossary",
+            desc: "Terms and acronyms that the analysis model should expand. One entry per line in the form `term: definition`. Included in the analysis prompt when present.",
+            placeholder: "KPI: Key Performance Indicator\nOKR: Objectives and Key Results",
         },
         // About 섹션 — 보안 고지 (Requirement 2.13)
         aboutHeading: "About",
@@ -108,7 +134,7 @@ export const en = {
         bufferEmpty: "The transcript is empty. No note was created.",
         // 본문 길이 초과로 분석 중단 (Requirement 6.5)
         transcriptTooLong:
-            "The transcript exceeds 100,000 characters and cannot be analyzed.",
+            "The transcript exceeds 200,000 characters and cannot be analyzed.",
         // Transcript_Folder 생성 실패 fallback (Requirement 4.5)
         folderCreateFailed:
             "Could not create the transcript folder. Saving to the vault root instead.",

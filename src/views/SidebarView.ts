@@ -8,7 +8,7 @@
 // 관련 요구사항: 1.7, 1.8, 1.9, 1.10, 3.5, 3.6, 3.7, 3.8, 4.7, 5.3, 5.4, 5.6,
 // 5.8, 5.9, 6.6, 6.16, 7.3, 7.4, 9.5, 10.4, 10.5
 
-import { ItemView, type App, type WorkspaceLeaf } from "obsidian";
+import { ItemView, setIcon, type App, type TFile, type WorkspaceLeaf } from "obsidian";
 import type { Translations } from "../i18n";
 import {
 	computeButtonStates,
@@ -86,6 +86,17 @@ export interface TranscribePluginLike {
 	handleSaveEditClick(newBody: string): void | Promise<void>;
 	/** 편집 취소 핸들러. 버퍼/노트에는 영향을 주지 않아야 한다. */
 	handleCancelEditClick(): void;
+	/** 복사 버튼 핸들러. 현재 뷰에 표시된 본문 텍스트를 받아 클립보드로 보낸다. */
+	handleCopyClick?(text: string): void | Promise<void>;
+	/** 최근 전사 리스트에서 항목을 선택했을 때 호출된다. */
+	handleRecentTranscriptClick?(file: TFile): void | Promise<void>;
+	/**
+	 * 최근 전사 파일 목록 조회(선택 구현).
+	 *
+	 * 뷰가 `onOpen()` 에서 직접 호출해 초기 로딩 시 리스트를 즉시 채울 때 사용한다.
+	 * 플러그인이 이 메서드를 구현하지 않아도 뷰는 빈 배열로 동작한다.
+	 */
+	getRecentTranscripts?(): TFile[];
 }
 
 /**
@@ -123,11 +134,13 @@ export class SidebarView extends ItemView {
 	// ──────────────────────────────────────────────────────────
 
 	private statusEl: HTMLDivElement | null = null;
+	private recordingIndicatorEl: HTMLSpanElement | null = null;
 	private stateLabelEl: HTMLSpanElement | null = null;
 	private reconnectLabelEl: HTMLSpanElement | null = null;
 	private startStopBtn: HTMLButtonElement | null = null;
 	private editBtn: HTMLButtonElement | null = null;
 	private analyzeBtn: HTMLButtonElement | null = null;
+	private copyBtn: HTMLButtonElement | null = null;
 	private spinnerEl: HTMLDivElement | null = null;
 	private transcribeContentEl: HTMLDivElement | null = null;
 	private transcriptTextEl: HTMLDivElement | null = null;
@@ -135,6 +148,10 @@ export class SidebarView extends ItemView {
 	private committedSpan: HTMLSpanElement | null = null;
 	private partialSpan: HTMLSpanElement | null = null;
 	private editorTextareaEl: HTMLTextAreaElement | null = null;
+	private recentListEl: HTMLDivElement | null = null;
+
+	/** 최근 전사 파일 목록(플러그인에서 주입). 기본은 빈 배열. */
+	private recentTranscripts: TFile[] = [];
 
 	constructor(leaf: WorkspaceLeaf, private plugin: TranscribePluginLike) {
 		super(leaf);
@@ -160,6 +177,14 @@ export class SidebarView extends ItemView {
 
 	async onOpen(): Promise<void> {
 		this.render();
+		// 앱 시작 시 사이드바가 이미 열려 있는 상태로 복원되면 activateView()가 호출되지 않는다.
+		// 뷰 자신이 초기 리스트를 주입해 "항상 최신 상태"를 보장한다.
+		try {
+			const files = this.plugin.getRecentTranscripts?.() ?? [];
+			this.setRecentTranscripts(files);
+		} catch (err) {
+			console.error("[SidebarView] initial recent list load failed:", err);
+		}
 	}
 
 	async onClose(): Promise<void> {
@@ -194,6 +219,9 @@ export class SidebarView extends ItemView {
 			this.renderReadMode();
 		}
 
+		// 최근 전사 리스트 — 컨텐츠 영역 아래 배치.
+		this.renderRecentList(root);
+
 		this.refreshButtons();
 	}
 
@@ -211,7 +239,7 @@ export class SidebarView extends ItemView {
 	 * 외부 스트리밍 상태/재연결 플래그를 반영한다(Requirement 1.9).
 	 *
 	 * 상태 변경은 상태 레이블, `data-state` 속성, 재연결 보조 라벨 가시성,
-	 * 그리고 버튼 활성화 정책까지 전파된다.
+	 * 녹음 중 인디케이터 가시성, 그리고 버튼 활성화 정책까지 전파된다.
 	 */
 	updateState(state: StreamingState, reconnecting: boolean): void {
 		this.currentState = state;
@@ -225,6 +253,13 @@ export class SidebarView extends ItemView {
 		}
 		if (this.reconnectLabelEl) {
 			this.reconnectLabelEl.toggleClass("is-hidden", !reconnecting);
+		}
+		// 녹음 중 인디케이터는 스트리밍 상태일 때만 노출한다(재연결 중에도 유지).
+		if (this.recordingIndicatorEl) {
+			this.recordingIndicatorEl.toggleClass(
+				"is-hidden",
+				state !== "streaming",
+			);
 		}
 
 		this.refreshButtons();
@@ -261,6 +296,8 @@ export class SidebarView extends ItemView {
 		this.updatePartialDom();
 		this.applyEmptyState();
 		this.scrollToBottom();
+		// committed 가 생기면 Copy 버튼도 활성화되어야 한다.
+		this.refreshButtons();
 	}
 
 	/**
@@ -281,6 +318,8 @@ export class SidebarView extends ItemView {
 			this.applyEmptyState();
 			this.scrollToBottom();
 		}
+		// 본문 변경에 따라 Copy 버튼 활성화 조건이 달라지므로 함께 갱신한다.
+		this.refreshButtons();
 	}
 
 	/**
@@ -340,6 +379,17 @@ export class SidebarView extends ItemView {
 	}
 
 	/**
+	 * 플러그인이 최근 전사 파일 목록을 주입할 때 호출한다.
+	 *
+	 * 전달받은 배열(mtime 내림차순, 최대 5개)을 그대로 저장하고 DOM 을 다시 그린다.
+	 * 리스트가 비어 있으면 "이전 전사 내역이 없습니다" 안내 문구를 노출한다.
+	 */
+	setRecentTranscripts(files: TFile[]): void {
+		this.recentTranscripts = files;
+		this.renderRecentListBody();
+	}
+
+	/**
 	 * 3개 버튼의 활성 상태/레이블을 재계산한다(Requirement 7.3, 7.4).
 	 *
 	 * 뷰 내부 플래그와 `plugin.getEnvironmentInputs()`의 값을 합쳐
@@ -364,12 +414,21 @@ export class SidebarView extends ItemView {
 
 		this.startStopBtn.disabled = !states.startStop.enabled;
 		this.startStopBtn.setText(this.plugin.t.buttons[states.startStop.labelKey]);
+		// CSS 에서 start / stop 시각 분기를 위한 data 속성(빨간 정지 버튼 스타일 등).
+		this.startStopBtn.setAttr("data-mode", states.startStop.labelKey);
 
 		this.editBtn.disabled = !states.edit.enabled;
 		this.editBtn.setText(this.plugin.t.buttons.edit);
 
 		this.analyzeBtn.disabled = !states.analyze.enabled;
 		this.analyzeBtn.setText(this.plugin.t.buttons.analyze);
+
+		// 복사 아이콘: 전사 보드 내부에 플로팅. 본문이 있고 편집/분석 중이 아닐 때만 활성.
+		// 편집 모드에서는 텍스트 보드 자체가 textarea 로 대체되므로 이 아이콘은 DOM 에서 사라져 있다.
+		if (this.copyBtn) {
+			const hasText = this.currentDisplayedText().length > 0;
+			this.copyBtn.disabled = !hasText || this.isAnalyzing;
+		}
 	}
 
 	// ──────────────────────────────────────────────────────────
@@ -379,13 +438,27 @@ export class SidebarView extends ItemView {
 	/**
 	 * 상태 영역(`transcribe-status`)을 그린다.
 	 *
-	 * 상태 레이블(주요)과 재연결 보조 라벨을 별도 span으로 유지하여,
-	 * 재연결 중일 때 주요 레이블은 "streaming" 그대로 두고 보조 라벨만 노출한다.
+	 * 구성:
+	 * - 녹음 중 빨간 펄스 인디케이터(`.recording-indicator`). 스트리밍 중이 아니면 숨김.
+	 * - 주요 상태 레이블(`.state-label`).
+	 * - 재연결 보조 라벨(`.reconnect-label`). 재연결 중이 아니면 숨김.
+	 *
+	 * 세 요소를 별도 span 으로 유지하여 재연결 중일 때 주요 레이블은 "streaming"을
+	 * 그대로 두고 보조 라벨만 노출한다.
 	 */
 	private renderStatus(root: HTMLElement): void {
 		const status = root.createDiv({ cls: "transcribe-status" });
 		status.setAttr("data-state", this.currentState);
 		this.statusEl = status;
+
+		// 녹음 중 빨간 펄스 인디케이터 — 스트리밍 상태일 때만 노출.
+		this.recordingIndicatorEl = status.createSpan({
+			cls: "recording-indicator",
+			attr: { "aria-label": "Recording" },
+		});
+		if (this.currentState !== "streaming") {
+			this.recordingIndicatorEl.addClass("is-hidden");
+		}
 
 		this.stateLabelEl = status.createSpan({
 			cls: "state-label",
@@ -455,6 +528,8 @@ export class SidebarView extends ItemView {
 	 * 읽기 모드 콘텐츠(`transcript-text` div + 빈 상태/committed/partial span)를 그린다.
 	 *
 	 * 빈 상태 안내(Requirement 1.10)는 전용 span을 두고 `is-hidden`으로 토글한다.
+	 * 보드 우상단에는 플로팅 복사 아이콘을 얹어, 편집 모드로 진입하지 않아도 한 번의
+	 * 클릭으로 전사 본문을 클립보드에 복사할 수 있게 한다.
 	 */
 	private renderReadMode(): void {
 		const container = this.transcribeContentEl;
@@ -462,7 +537,10 @@ export class SidebarView extends ItemView {
 		container.empty();
 		this.editorTextareaEl = null;
 
-		this.transcriptTextEl = container.createDiv({ cls: "transcript-text" });
+		// 포지셔닝 래퍼 — 복사 아이콘을 absolute 배치하려면 position: relative 맥락이 필요.
+		const wrapper = container.createDiv({ cls: "transcript-wrapper" });
+
+		this.transcriptTextEl = wrapper.createDiv({ cls: "transcript-text" });
 
 		this.emptyHintEl = this.transcriptTextEl.createSpan({
 			cls: "empty-hint",
@@ -472,6 +550,21 @@ export class SidebarView extends ItemView {
 			cls: "committed",
 		});
 		this.partialSpan = this.transcriptTextEl.createSpan({ cls: "partial" });
+
+		// 복사 아이콘 버튼 — 전사 보드 우상단 플로팅. 스트리밍 중에도 현재까지 본문 복사 가능.
+		this.copyBtn = wrapper.createEl("button", {
+			cls: "transcript-copy-icon",
+			attr: {
+				"aria-label": this.plugin.t.buttons.copy,
+				title: this.plugin.t.buttons.copy,
+				type: "button",
+			},
+		});
+		// Lucide `clipboard` 아이콘 — Obsidian 기본 제공.
+		setIcon(this.copyBtn, "clipboard");
+		this.plugin.registerDomEvent(this.copyBtn, "click", () => {
+			void this.plugin.handleCopyClick?.(this.currentDisplayedText());
+		});
 
 		this.updateCommittedDom();
 		this.updatePartialDom();
@@ -564,15 +657,79 @@ export class SidebarView extends ItemView {
 	}
 
 	/**
+	 * 최근 전사 섹션의 컨테이너를 그린다. 실제 항목은 `renderRecentListBody`가 다시 채운다.
+	 */
+	private renderRecentList(root: HTMLElement): void {
+		const section = root.createDiv({ cls: "transcribe-recent" });
+		section.createEl("h4", {
+			cls: "transcribe-recent__heading",
+			text: this.plugin.t.ui.recentTranscripts,
+		});
+		this.recentListEl = section.createDiv({ cls: "transcribe-recent__list" });
+		this.renderRecentListBody();
+	}
+
+	/**
+	 * 최근 전사 리스트 본문을 최신 `recentTranscripts` 값으로 재구성한다.
+	 *
+	 * 각 항목은 클릭 가능한 버튼으로 렌더되며, 클릭 시 플러그인의 핸들러로 파일을 전달한다.
+	 */
+	private renderRecentListBody(): void {
+		const container = this.recentListEl;
+		if (!container) return;
+		container.empty();
+
+		if (this.recentTranscripts.length === 0) {
+			container.createSpan({
+				cls: "transcribe-recent__empty",
+				text: this.plugin.t.ui.noRecentTranscripts,
+			});
+			return;
+		}
+
+		for (const file of this.recentTranscripts) {
+			const item = container.createEl("button", {
+				cls: "transcribe-recent__item",
+			});
+			item.createSpan({
+				cls: "transcribe-recent__title",
+				text: formatTranscriptDisplayName(file.basename),
+			});
+			item.createSpan({
+				cls: "transcribe-recent__meta",
+				text: formatRelativeMtime(file.stat.mtime),
+			});
+			this.plugin.registerDomEvent(item, "click", () => {
+				void this.plugin.handleRecentTranscriptClick?.(file);
+			});
+		}
+	}
+
+	/**
+	 * 현재 뷰에 "사용자에게 보이는" 본문 텍스트를 반환한다.
+	 *
+	 * - 편집 모드: textarea 의 현재 값.
+	 * - 읽기 모드: `committedText`(partial 은 제외 — 확정된 내용만 복사).
+	 */
+	private currentDisplayedText(): string {
+		if (this.isEditing && this.editorTextareaEl) {
+			return this.editorTextareaEl.value;
+		}
+		return this.committedText;
+	}
+
+	/**
 	 * DOM 참조 필드를 모두 null로 리셋한다. `render()` 시작과 `onClose`에서 호출.
 	 */
 	private clearDomRefs(): void {
 		this.statusEl = null;
+		this.recordingIndicatorEl = null;
 		this.stateLabelEl = null;
 		this.reconnectLabelEl = null;
 		this.startStopBtn = null;
 		this.editBtn = null;
 		this.analyzeBtn = null;
+		this.copyBtn = null;
 		this.spinnerEl = null;
 		this.transcribeContentEl = null;
 		this.transcriptTextEl = null;
@@ -580,5 +737,62 @@ export class SidebarView extends ItemView {
 		this.committedSpan = null;
 		this.partialSpan = null;
 		this.editorTextareaEl = null;
+		this.recentListEl = null;
 	}
+}
+
+/**
+ * 파일 수정 시각 타임스탬프(ms)를 사용자 친화적 상대 시각 문자열로 변환한다.
+ *
+ * `Intl.RelativeTimeFormat` 을 사용해 "방금 전", "3분 전", "2시간 전" 같은 표현을
+ * 로케일에 맞게 생성한다. Obsidian 이 내부적으로 `navigator.language` 를 이미 반영하므로
+ * 별도의 로케일 인자는 받지 않는다.
+ */
+function formatRelativeMtime(mtime: number): string {
+	const diffSec = Math.round((mtime - Date.now()) / 1000);
+	const rtf = new Intl.RelativeTimeFormat(navigator.language, {
+		numeric: "auto",
+	});
+	if (Math.abs(diffSec) < 60) {
+		return rtf.format(diffSec, "second");
+	}
+	const diffMin = Math.round(diffSec / 60);
+	if (Math.abs(diffMin) < 60) {
+		return rtf.format(diffMin, "minute");
+	}
+	const diffHour = Math.round(diffMin / 60);
+	if (Math.abs(diffHour) < 24) {
+		return rtf.format(diffHour, "hour");
+	}
+	const diffDay = Math.round(diffHour / 24);
+	return rtf.format(diffDay, "day");
+}
+
+/**
+ * 전사 노트의 `basename` 을 사용자 친화적인 표시용 문자열로 변환한다.
+ *
+ * 파일 시스템 호환성을 위해 저장 시에는 콜론 대신 하이픈을 사용한다(`HH-mm`).
+ * UI 에서는 일반적인 시각 표기(`HH:mm`)로 되돌려 가독성을 높인다.
+ *
+ * 매칭 규칙:
+ * - `YYYY-MM-DD HH-mm[-N]` → `YYYY-MM-DD HH:mm` (충돌 회피 suffix 는 제거)
+ * - 구 포맷 `Transcribe-YYYYMMDD-HHmmss[-N]` 도 동일하게 변환해 이전 노트도 예쁘게 표시.
+ * - 매칭되지 않는 파일명은 원본 그대로 반환한다(사용자 정의 이름 존중).
+ */
+function formatTranscriptDisplayName(basename: string): string {
+	// 새 포맷: 2025-11-10 14-23 또는 2025-11-10 14-23-1
+	const newFmt = /^(\d{4}-\d{2}-\d{2}) (\d{2})-(\d{2})(?:-\d+)?$/.exec(basename);
+	if (newFmt) {
+		const [, date, hh, mm] = newFmt;
+		return `${date} ${hh}:${mm}`;
+	}
+	// 구 포맷: Transcribe-20251110-142345 또는 Transcribe-20251110-142345-1
+	const oldFmt = /^Transcribe-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})\d{2}(?:-\d+)?$/.exec(
+		basename,
+	);
+	if (oldFmt) {
+		const [, y, mo, d, hh, mm] = oldFmt;
+		return `${y}-${mo}-${d} ${hh}:${mm}`;
+	}
+	return basename;
 }

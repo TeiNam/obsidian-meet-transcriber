@@ -152,6 +152,17 @@ export interface StartParams {
 	region: string;
 	/** 전사 언어 코드(Requirements 2.9). */
 	languageCode: LanguageCode;
+	/**
+	 * AWS Transcribe 커스텀 어휘 이름(선택).
+	 *
+	 * 빈 문자열/`undefined` 면 SDK 에 해당 파라미터를 전달하지 않아 표준 어휘로 전사한다.
+	 * 값이 있으면 `StartStreamTranscriptionCommand.VocabularyName` 로 전달되어
+	 * Transcribe 모델이 해당 어휘의 단어를 우선 인식한다.
+	 *
+	 * 주의: Vocabulary 는 동일 리전/언어로 미리 생성돼 있어야 한다. 부적합하면 세션
+	 * 수립에서 `BadRequestException` 이 발생하여 `onSessionError("start_failed")` 로 통지된다.
+	 */
+	vocabularyName?: string;
 	/** 이벤트 콜백 묶음. */
 	callbacks: TranscribeCallbacks;
 }
@@ -561,12 +572,19 @@ export class TranscribeService {
 				}
 			}, this.sessionEstablishTimeoutMs);
 
+			// 커스텀 어휘 이름은 빈 문자열이면 전달하지 않는다(AWS 는 빈 문자열을 허용하지 않는다).
+			const vocabularyName =
+				params.vocabularyName && params.vocabularyName.trim().length > 0
+					? params.vocabularyName.trim()
+					: undefined;
+
 			// StartStreamTranscriptionCommand 구성. AudioStream 은 AsyncIterable 로 전달.
 			const command = new StartStreamTranscriptionCommand({
 				LanguageCode: languageCode,
 				MediaEncoding: "pcm",
 				MediaSampleRateHertz: TRANSCRIBE_SAMPLE_RATE_HERTZ,
 				AudioStream: this.buildAudioStream(session),
+				...(vocabularyName ? { VocabularyName: vocabularyName } : {}),
 			});
 
 			// 세션 시작 — send() 는 세션 종료 시까지 유지되는 긴 프로미스.

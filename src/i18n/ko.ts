@@ -17,6 +17,7 @@ export const ko: Translations = {
         stop: "스트리밍 중지",
         edit: "편집",
         analyze: "분석",
+        copy: "복사",
         save: "저장",
         cancel: "취소",
     },
@@ -34,6 +35,14 @@ export const ko: Translations = {
         analyzing: "분석 중...",
         // 편집 모드 빈 내용 안내
         editorEmpty: "편집할 내용이 없습니다.",
+        // 최근 전사 섹션 헤더
+        recentTranscripts: "최근 전사",
+        // 최근 전사 리스트에 항목이 없을 때
+        noRecentTranscripts: "이전 전사 내역이 없습니다.",
+        // 복사 성공 Notice
+        copied: "전사 내용을 클립보드에 복사했습니다.",
+        // 복사 실패 Notice
+        copyFailed: "전사 내용을 클립보드에 복사하지 못했습니다.",
     },
     settings: {
         // UI_Locale 드롭다운 (Requirement 2.2 — 설정 탭의 첫 항목)
@@ -73,7 +82,24 @@ export const ko: Translations = {
         analysisHeading: "분석",
         bedrockModelId: {
             name: "Bedrock 모델 ID",
-            desc: "분석에 사용할 파운데이션 모델 식별자입니다 (예: anthropic.claude-3-sonnet-20240229-v1:0).",
+            desc: "분석에 사용할 파운데이션 모델 또는 추론 프로필 ID입니다. 새로고침을 누르면 AWS에서 사용 가능한 모델을 불러옵니다.",
+            refresh: "모델 목록 새로고침",
+            loading: "모델 목록 불러오는 중...",
+            empty: "사용 가능한 모델이 없습니다. 자격 증명과 리전을 확인한 뒤 새로고침을 눌러 주세요.",
+            custom: "직접 입력(저장된 값 유지)",
+        },
+        // Vocabulary 섹션 (A) — 전사 정확도를 높이는 AWS Transcribe 커스텀 어휘 이름
+        vocabularyHeading: "단어장",
+        transcribeVocabularyName: {
+            name: "Transcribe 커스텀 어휘 이름",
+            desc: "선택된 리전과 언어에 맞춰 AWS Transcribe 에 등록해 둔 커스텀 어휘 이름을 입력합니다. 비워 두면 비활성화됩니다. AWS 콘솔의 Transcribe → 사용자 지정 어휘에서 미리 등록하세요.",
+            placeholder: "my-team-vocab",
+        },
+        // Glossary 섹션 (B) — 분석 프롬프트에 삽입되는 용어 사전
+        analysisGlossary: {
+            name: "분석 용어 사전",
+            desc: "분석 모델이 참고할 용어와 약어 정의입니다. 한 줄에 하나씩 `용어: 설명` 형태로 작성하세요. 값이 있으면 분석 프롬프트에 용어집 섹션으로 삽입됩니다.",
+            placeholder: "KPI: Key Performance Indicator (핵심 성과 지표)\nOKR: Objectives and Key Results (목표 및 핵심 결과)",
         },
         // About 섹션 — 보안 고지 (Requirement 2.13)
         aboutHeading: "정보",
@@ -110,7 +136,7 @@ export const ko: Translations = {
         bufferEmpty: "전사 내용이 비어 있어 노트를 생성하지 않았습니다.",
         // 본문 길이 초과로 분석 중단 (Requirement 6.5)
         transcriptTooLong:
-            "전사 본문이 100,000자를 초과하여 분석할 수 없습니다.",
+            "전사 본문이 200,000자를 초과하여 분석할 수 없습니다.",
         // Transcript_Folder 생성 실패 fallback (Requirement 4.5)
         folderCreateFailed:
             "전사 폴더를 생성하지 못했습니다. 볼트 루트에 저장합니다.",

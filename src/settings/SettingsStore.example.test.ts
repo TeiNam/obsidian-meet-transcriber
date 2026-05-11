@@ -103,6 +103,8 @@ describe("SettingsStore.load — 기본값 머지 (Requirement 2.11)", () => {
 			bedrockModelId: "anthropic.claude-3-sonnet-20240229-v1:0",
 			languageCode: "en-US",
 			transcriptFolder: "Transcripts/Meetings",
+			transcribeVocabularyName: "",
+			analysisGlossary: "",
 		};
 		fakePlugin.loadData.mockResolvedValue(saved);
 
@@ -147,6 +149,8 @@ describe("SettingsStore.save — 저장 위임 및 에러 전파 (Requirement 2.
 		bedrockModelId: "anthropic.claude-3-haiku-20240307-v1:0",
 		languageCode: "ko-KR",
 		transcriptFolder: "Transcripts",
+		transcribeVocabularyName: "",
+		analysisGlossary: "",
 	};
 
 	beforeEach(() => {

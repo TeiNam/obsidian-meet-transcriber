@@ -51,12 +51,20 @@ import {
 	type SidebarEnvironmentInputs,
 } from "./views/SidebarView";
 
+// ─ AudioWorklet 소스 — 번들 단계에서 문자열로 인라인된다(esbuild workletTextPlugin).
+//   런타임에 Blob URL 을 만들어 audioWorklet.addModule 에 전달한다. 별도 배포 파일 불필요.
+import pcmWorkletSource from "./audio/pcm-worklet.js?worklet";
+
 // ── 보조 상수 ────────────────────────────────────────────────────────────
 
 /**
  * 분석 본문 길이 한계(Requirement 6.5). `BedrockService` 와 동일한 값을 참조한다.
+ *
+ * Claude 4.5 의 200K 토큰 컨텍스트 윈도우를 기준으로 200,000 자로 설정한다.
+ * 실제 검증은 `BedrockService.analyze` 내부에서도 동일 값으로 수행되며,
+ * 본 상수는 서버 호출 전 UI 에서 조기 차단하기 위한 이중 방어선이다.
  */
-const MAX_TRANSCRIPT_LENGTH = 100_000;
+const MAX_TRANSCRIPT_LENGTH = 200_000;
 
 /**
  * Notice 기본 표시 시간(밀리초). 3초 이상 표시 요구(예: Requirement 2.14)를 충족.
@@ -95,6 +103,13 @@ export default class TranscribePlugin extends Plugin {
 
 	/** 현재 세션과 연결된 Transcript_Note 파일. 저장 후 세팅된다. */
 	private currentTranscriptFile: TFile | null = null;
+
+	/**
+	 * 현재 편집/분석 대상인 노트의 본문 문자 길이.
+	 * 저장 직후 `clearBuffer()` 때문에 `TranscriptBuffer.length()` 가 0 으로 떨어져도
+	 * 이 값은 보존되어 편집/분석 버튼의 활성 조건(Requirement 5.1, 6.3)을 만족시킨다.
+	 */
+	private currentNoteBodyLength = 0;
 
 	/** 현재 세션이 시작된 시각(ISO 8601). 저장 시 프론트매터에 기록된다. */
 	private sessionStartedAt: string | null = null;
@@ -136,12 +151,12 @@ export default class TranscribePlugin extends Plugin {
 					},
 				}),
 		);
-		// pcm-worklet.js 는 플러그인 폴더에 함께 배포되며, Obsidian Vault adapter 로
-		// 런타임 리소스 URL 을 해석한다. manifest.dir 이 없는 초기 상태에는 빈 문자열을
-		// 사용해 안전하게 fallback 한다(테스트에서는 workletUrl 옵션을 주입해 우회).
-		const workletRelativePath = `${this.manifest.dir ?? ""}/pcm-worklet.js`;
+		// AudioWorklet 소스는 번들에 문자열로 인라인되어 있다(esbuild workletTextPlugin).
+		// `AudioCapture` 가 이 소스로 Blob URL 을 생성해 audioWorklet.addModule 에 전달한다.
+		// 별도 리소스 파일 배포가 불필요하며, Obsidian 의 `app://` 리소스 URL 에서 발생하는
+		// `AbortError: Unable to load a worklet's module` 도 우회한다.
 		const audioCapture = new AudioCapture({
-			workletUrl: this.app.vault.adapter.getResourcePath(workletRelativePath),
+			workletSource: pcmWorkletSource,
 		});
 		this.transcribeService = new TranscribeService(
 			audioCapture,
@@ -215,11 +230,16 @@ export default class TranscribePlugin extends Plugin {
 
 	/**
 	 * 사이드바 뷰를 열거나 이미 열려 있으면 포커스를 이동한다(Requirement 1.2, 1.3).
+	 *
+	 * 열린 직후 최근 전사 리스트를 주입하여 첫 표시가 지연되지 않게 한다.
 	 */
 	async activateView(): Promise<void> {
 		const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_TRANSCRIBE);
 		if (existing.length > 0) {
 			this.app.workspace.revealLeaf(existing[0]);
+			this.forEachSidebar((view) =>
+				view.setRecentTranscripts(this.getRecentTranscripts()),
+			);
 			return;
 		}
 		const leaf: WorkspaceLeaf | null = this.app.workspace.getRightLeaf(false);
@@ -228,6 +248,12 @@ export default class TranscribePlugin extends Plugin {
 		}
 		await leaf.setViewState({ type: VIEW_TYPE_TRANSCRIBE, active: true });
 		this.app.workspace.revealLeaf(leaf);
+		// setViewState 이후 뷰가 초기화되므로 리스트 주입은 마이크로태스크로 한 번 지연.
+		queueMicrotask(() => {
+			this.forEachSidebar((view) =>
+				view.setRecentTranscripts(this.getRecentTranscripts()),
+			);
+		});
 	}
 
 	/**
@@ -259,11 +285,20 @@ export default class TranscribePlugin extends Plugin {
 	 * 버튼 활성화 정책에 넘길 현재 환경 스냅샷을 반환한다.
 	 *
 	 * 순수 조회만 수행하며 부작용이 없어야 한다(정책이 멱등하게 계산되도록).
+	 * `transcriptLength` 는 **현재 뷰에 로드된 노트 본문 길이**를 사용한다.
+	 * 스트리밍 중에는 버퍼 길이를 대신 사용하며, 저장 후에는 저장된 노트 본문 길이가 유지되어
+	 * 편집/분석 버튼 활성화가 보장된다.
 	 */
 	getEnvironmentInputs(): SidebarEnvironmentInputs {
+		const bufferLength = this.transcribeService.getTranscriptBuffer().length();
+		// 스트리밍 중에는 실시간 버퍼 길이가 의미 있고, 저장 이후에는 currentNoteBodyLength 가 정답.
+		const isStreaming = this.state.getState() === "streaming";
+		const effectiveLength = isStreaming
+			? bufferLength
+			: Math.max(bufferLength, this.currentNoteBodyLength);
 		return {
 			hasTranscriptNote: this.currentTranscriptFile !== null,
-			transcriptLength: this.transcribeService.getTranscriptBuffer().length(),
+			transcriptLength: effectiveLength,
 			hasCredentials: this.hasAwsCredentials(),
 			hasBedrockModel: this.settings.bedrockModelId.trim().length > 0,
 		};
@@ -334,6 +369,7 @@ export default class TranscribePlugin extends Plugin {
 		}
 		// 성공 — 뷰 본문 갱신 + 플래그 해제.
 		this.isEditing = false;
+		this.currentNoteBodyLength = newBody.length;
 		this.forEachSidebar((view) => view.loadNoteContent(newBody));
 		this.refreshSidebarButtons();
 	}
@@ -343,6 +379,73 @@ export default class TranscribePlugin extends Plugin {
 	 */
 	handleCancelEditClick(): void {
 		this.isEditing = false;
+		this.refreshSidebarButtons();
+	}
+
+	/**
+	 * 복사 버튼 클릭 핸들러.
+	 *
+	 * 현재 뷰에 로드된 본문(편집 중이면 editor textarea 값, 아니면 committed 버퍼/노트)을
+	 * 시스템 클립보드에 복사한다. 복사할 내용이 비어 있으면 Notice 로 안내하고 조기 종료.
+	 *
+	 * `navigator.clipboard.writeText` 를 우선 사용하되 실패 시 Notice 로 fallback 안내.
+	 */
+	async handleCopyClick(text: string): Promise<void> {
+		if (text.length === 0) {
+			new Notice(this.t.notices.bufferEmpty, NOTICE_DURATION_MS);
+			return;
+		}
+		try {
+			await navigator.clipboard.writeText(text);
+			new Notice(this.t.ui.copied, NOTICE_DURATION_MS);
+		} catch (err) {
+			console.error("[TranscribePlugin] clipboard write failed:", err);
+			new Notice(this.t.ui.copyFailed, NOTICE_DURATION_MS);
+		}
+	}
+
+	/**
+	 * 사이드바의 "최근 전사" 리스트에 노출할 파일 목록을 반환한다.
+	 *
+	 * 현재 설정된 `transcriptFolder` 를 대상으로 최대 5개를 mtime 내림차순으로 조회한다.
+	 * 순수 조회 메서드이며 부작용은 없다.
+	 */
+	getRecentTranscripts(): TFile[] {
+		return this.noteStore.listRecentTranscripts(
+			this.settings.transcriptFolder,
+			5,
+		);
+	}
+
+	/**
+	 * 최근 전사 리스트에서 항목을 클릭했을 때의 핸들러.
+	 *
+	 * - 스트리밍 중에는 차단(현재 세션을 덮어쓰면 데이터 손실 가능).
+	 * - 선택된 파일 본문을 읽어 현재 편집/분석 대상으로 승격한다.
+	 * - 상태는 유지하고 버튼 활성 정책만 재계산한다.
+	 */
+	async handleRecentTranscriptClick(file: TFile): Promise<void> {
+		if (this.state.getState() === "streaming") {
+			new Notice(
+				this.t.notices.streamingBlockEditAnalyze,
+				NOTICE_DURATION_MS,
+			);
+			return;
+		}
+		let body: string;
+		try {
+			body = await this.noteStore.readTranscriptBody(file);
+		} catch (err) {
+			console.error("[TranscribePlugin] readTranscriptBody failed:", err);
+			new Notice(this.t.notices.ioError, NOTICE_DURATION_MS);
+			return;
+		}
+		this.currentTranscriptFile = file;
+		this.currentNoteBodyLength = body.length;
+		// 새 세션이 아니라 기존 노트 로드이므로 현재 버퍼/세션 시작 시각은 유지하지 않는다.
+		this.transcribeService.clearBuffer();
+		this.sessionStartedAt = null;
+		this.forEachSidebar((view) => view.loadNoteContent(body));
 		this.refreshSidebarButtons();
 	}
 
@@ -405,6 +508,7 @@ export default class TranscribePlugin extends Plugin {
 				modelId: this.settings.bedrockModelId,
 				transcript: body,
 				locale: this.settings.uiLocale,
+				glossary: this.settings.analysisGlossary,
 			});
 			try {
 				await this.noteStore.appendAnalysis(
@@ -420,6 +524,7 @@ export default class TranscribePlugin extends Plugin {
 			// 본문이 바뀌었으므로 뷰를 최신 노트 내용으로 갱신한다.
 			try {
 				const updated = await this.noteStore.readTranscriptBody(file);
+				this.currentNoteBodyLength = updated.length;
 				this.forEachSidebar((view) => view.loadNoteContent(updated));
 			} catch (err) {
 				console.error(
@@ -476,6 +581,7 @@ export default class TranscribePlugin extends Plugin {
 		// 사용자가 별도로 편집/분석할 수 있도록 vault 에 남겨 둔다.
 		this.transcribeService.clearBuffer();
 		this.currentTranscriptFile = null;
+		this.currentNoteBodyLength = 0;
 		this.forEachSidebar((view) => view.loadNoteContent(""));
 
 		try {
@@ -483,6 +589,7 @@ export default class TranscribePlugin extends Plugin {
 				credentials: this.currentCredentials(),
 				region: this.settings.region,
 				languageCode: this.settings.languageCode,
+				vocabularyName: this.settings.transcribeVocabularyName,
 				callbacks: this.buildTranscribeCallbacks(),
 			});
 		} catch (err) {
@@ -524,7 +631,12 @@ export default class TranscribePlugin extends Plugin {
 			if (file !== null) {
 				this.currentTranscriptFile = file;
 				const body = await this.noteStore.readTranscriptBody(file);
+				this.currentNoteBodyLength = body.length;
 				this.forEachSidebar((view) => view.loadNoteContent(body));
+				// 저장 직후 "최근 전사" 리스트를 새로고침해 방금 저장된 항목이 즉시 노출되도록 한다.
+				this.forEachSidebar((view) =>
+					view.setRecentTranscripts(this.getRecentTranscripts()),
+				);
 			}
 			this.state.dispatch({ type: "SESSION_CLOSED" });
 		} catch (err) {

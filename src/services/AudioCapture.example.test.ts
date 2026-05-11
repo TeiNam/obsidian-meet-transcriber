@@ -59,9 +59,10 @@ describe("AudioCapture.requestPermission — 권한 허용 (Requirement 3.1)", (
 		expect(getUserMedia).toHaveBeenCalledTimes(1);
 	});
 
-	it("getUserMedia에 16kHz/모노/에코캔슬 제약을 전달한다", async () => {
-		// Requirements 3.1, 3.4 — 서비스는 target sample rate 16kHz, 단일 채널,
-		// 에코캔슬을 요청한다. 실제 수용 여부는 브라우저가 결정하지만 제약은 반드시 전달된다.
+	it("getUserMedia에 모노/에코캔슬 ideal 힌트를 전달한다 (sampleRate는 AudioWorklet이 다운샘플링)", async () => {
+		// Requirements 3.1 — 일부 장치/OS(특히 macOS Chromium)는 sampleRate 엄격 제약에
+		// OverconstrainedError 를 던지므로, 권한 흐름 차단을 피하기 위해 sampleRate 는
+		// 요청하지 않고 channelCount/echoCancellation 만 ideal 힌트로 전달한다.
 		const getUserMedia = vi.fn().mockResolvedValue(createMockStream([]));
 		const capture = new AudioCapture({ getUserMedia });
 
@@ -69,11 +70,35 @@ describe("AudioCapture.requestPermission — 권한 허용 (Requirement 3.1)", (
 
 		expect(getUserMedia).toHaveBeenCalledWith({
 			audio: {
-				sampleRate: 16000,
-				channelCount: 1,
-				echoCancellation: true,
+				channelCount: { ideal: 1 },
+				echoCancellation: { ideal: true },
 			},
 		});
+	});
+
+	it("OverconstrainedError가 나면 { audio: true }로 재시도해 스트림을 획득한다", async () => {
+		// 일부 하드웨어는 ideal 힌트조차도 문제 삼지 않지만, 다른 제약 조합에서 OverconstrainedError 가
+		// 나올 수 있다. 이 경우 가장 관대한 제약으로 한 번 더 시도해 사용자 흐름을 차단하지 않는다.
+		const stream = createMockStream([createMockTrack("audio")]);
+		const overconstrained = new Error("sample rate not supported");
+		overconstrained.name = "OverconstrainedError";
+		const getUserMedia = vi
+			.fn()
+			.mockRejectedValueOnce(overconstrained)
+			.mockResolvedValueOnce(stream);
+		// requestPermission 은 fallback 경로의 console.error 를 남긴다 — 캡처만 하고 출력은 막는다.
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		try {
+			const capture = new AudioCapture({ getUserMedia });
+			const result = await capture.requestPermission();
+
+			expect(result).toBe(stream);
+			expect(getUserMedia).toHaveBeenCalledTimes(2);
+			expect(getUserMedia).toHaveBeenNthCalledWith(2, { audio: true });
+		} finally {
+			errorSpy.mockRestore();
+		}
 	});
 });
 

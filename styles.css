@@ -31,13 +31,16 @@
     padding: var(--size-4-2);
     border-left: 3px solid transparent; /* 상태별 강조 바용 고정 슬롯 */
     display: flex;
-    flex-direction: column;
-    gap: var(--size-4-1);
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--size-4-2);
 }
 
 /* 스트리밍 중 — interactive-accent 색으로 강조 */
 .transcribe-status[data-state="streaming"] {
     border-left-color: var(--interactive-accent);
+    background: var(--background-modifier-hover);
 }
 
 /* 오류 상태 — 에러 색으로 강조 */
@@ -45,10 +48,45 @@
     border-left-color: var(--background-modifier-error);
 }
 
+/* ─────────────────────────────────────────────
+ * 2-a. 녹음 중 인디케이터 — 스트리밍일 때 빨간 점이 펄스 애니메이션
+ * ───────────────────────────────────────────── */
+.recording-indicator {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--background-modifier-error, #e74c3c);
+    box-shadow: 0 0 0 0 var(--background-modifier-error, #e74c3c);
+    animation: transcribe-pulse 1.4s ease-out infinite;
+    flex-shrink: 0;
+}
+
+@keyframes transcribe-pulse {
+    0% {
+        transform: scale(0.9);
+        box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.6);
+    }
+    70% {
+        transform: scale(1.1);
+        box-shadow: 0 0 0 10px rgba(231, 76, 60, 0);
+    }
+    100% {
+        transform: scale(0.9);
+        box-shadow: 0 0 0 0 rgba(231, 76, 60, 0);
+    }
+}
+
 /* 상태 레이블 — 주요 상태 텍스트 */
 .transcribe-status .state-label {
     font-size: var(--font-ui-medium);
     color: var(--text-normal);
+    font-weight: var(--font-semibold);
+}
+
+/* 스트리밍 중에는 상태 레이블을 accent 색으로 */
+.transcribe-status[data-state="streaming"] .state-label {
+    color: var(--interactive-accent);
 }
 
 /* 재연결 레이블 — 보조 텍스트로 뮤트 처리 */
@@ -81,10 +119,23 @@
     background: var(--interactive-accent);
     color: var(--text-on-accent);
     border: none;
+    font-weight: var(--font-semibold);
+    min-width: 7em;
 }
 
 .start-stop-btn:hover:not(:disabled) {
     background: var(--interactive-accent-hover);
+}
+
+/* 중지 모드 — 녹음 중임을 시각적으로 강조하기 위해 빨간색 배경으로 전환 */
+.start-stop-btn[data-mode="stop"] {
+    background: var(--background-modifier-error, #e74c3c);
+    color: var(--text-on-accent, #fff);
+}
+
+.start-stop-btn[data-mode="stop"]:hover:not(:disabled) {
+    background: var(--background-modifier-error-hover, #c0392b);
+    opacity: 0.9;
 }
 
 /* 편집/분석 버튼 — 보조 액션으로 기본 배경 사용 */
@@ -127,7 +178,16 @@
     min-height: 0; /* flex 자식이 overflow 스크롤을 갖도록 */
 }
 
-/* 전사 텍스트 — 모노스페이스로 실시간 표시, 세로 스크롤 */
+/* 전사 텍스트 컨테이너 — 플로팅 복사 아이콘을 얹기 위한 relative 래퍼 */
+.transcript-wrapper {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+}
+
+/* 전사 텍스트 — 모노스페이스로 실시간 표시, 세로 스크롤, 드래그 선택 가능 */
 .transcript-text {
     font-family: var(--font-monospace);
     font-size: var(--font-ui-small);
@@ -136,11 +196,54 @@
     border: 1px solid var(--background-modifier-border);
     border-radius: var(--radius-s);
     padding: var(--size-4-2);
+    padding-right: calc(var(--size-4-2) + 28px); /* 복사 아이콘 공간 확보 */
     white-space: pre-wrap;
     word-break: break-word;
     overflow-y: auto;
     max-height: 60vh;
     flex: 1;
+    /* Obsidian 사이드바는 기본적으로 텍스트 선택이 막힌 컨텍스트가 많다.
+       편집 버튼을 누르지 않고도 드래그 선택이 되도록 명시적으로 허용한다. */
+    user-select: text;
+    -webkit-user-select: text;
+    cursor: text;
+}
+
+/* 플로팅 복사 아이콘 — 전사 보드 우상단에 고정, 호버 시 강조 */
+.transcript-copy-icon {
+    position: absolute;
+    top: var(--size-4-1);
+    right: var(--size-4-1);
+    width: 28px;
+    height: 28px;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--background-secondary);
+    color: var(--text-muted);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    cursor: pointer;
+    opacity: 0.75;
+    transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+    z-index: 1;
+}
+
+.transcript-copy-icon:hover:not(:disabled) {
+    opacity: 1;
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+}
+
+.transcript-copy-icon:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.transcript-copy-icon .svg-icon {
+    width: 16px;
+    height: 16px;
 }
 
 /* Partial 결과 — 확정 전이므로 뮤트/이탤릭 처리 */
@@ -224,4 +327,91 @@
  * ───────────────────────────────────────────── */
 .is-hidden {
     display: none;
+}
+
+/* ─────────────────────────────────────────────
+ * 8. 최근 전사 리스트 — 사이드바 하단 섹션
+ * ───────────────────────────────────────────── */
+.transcribe-recent {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-1);
+    border-top: 1px solid var(--background-modifier-border);
+    padding-top: var(--size-4-2);
+    margin-top: var(--size-4-2);
+}
+
+.transcribe-recent__heading {
+    margin: 0;
+    font-size: var(--font-ui-small);
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.transcribe-recent__list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-1);
+}
+
+.transcribe-recent__empty {
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+    font-style: italic;
+    padding: var(--size-4-1) 0;
+}
+
+.transcribe-recent__item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    width: 100%;
+    text-align: left;
+    padding: var(--size-4-1) var(--size-4-2);
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.transcribe-recent__item:hover {
+    background: var(--background-modifier-hover);
+    border-color: var(--interactive-accent);
+}
+
+.transcribe-recent__title {
+    font-weight: var(--font-semibold);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    width: 100%;
+}
+
+.transcribe-recent__meta {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller, var(--font-ui-small));
+}
+
+/* ─────────────────────────────────────────────
+ * 9. 설정 탭 — 분석 용어 사전(analysis glossary) textarea
+ * ───────────────────────────────────────────── */
+.transcribe-glossary-textarea {
+    width: 100%;
+    min-height: 8em;
+    font-family: var(--font-monospace);
+    font-size: var(--font-ui-small);
+    resize: vertical;
+}
+
+/* 설정 탭 보조 상태 라인(모델 목록 로딩 등)과 분석 글로서리 탭에서 공통 사용 */
+.transcribe-setting-status {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller, var(--font-ui-small));
+    padding: var(--size-4-1) 0 0 0;
+    font-style: italic;
 }

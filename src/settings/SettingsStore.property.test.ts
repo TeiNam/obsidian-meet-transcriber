@@ -75,6 +75,8 @@ const validSettingsArb: fc.Arbitrary<TranscribeSettings> = fc.record({
 	bedrockModelId: fc.string({ maxLength: MAX_BEDROCK_MODEL_ID_LENGTH }),
 	languageCode: fc.constantFrom<LanguageCode>(...ALLOWED_LANGUAGE_CODES),
 	transcriptFolder: fc.string(),
+	transcribeVocabularyName: fc.string({ maxLength: 200 }),
+	analysisGlossary: fc.string(),
 });
 
 // ---------------------------------------------------------------------------

@@ -66,7 +66,7 @@ const ANALYSIS_HEADER: Record<SupportedLocale, string> = {
 
 /** 결정론적 파일명 타임스탬프를 위한 고정 시각(로컬). */
 const FIXED_NOW = new Date(2025, 0, 15, 9, 30, 0);
-const FIXED_BASENAME = "Transcribe-20250115-093000";
+const FIXED_BASENAME = "2025-01-15 09-30";
 
 // ---------------------------------------------------------------------------
 // 헬퍼
