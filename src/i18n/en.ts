@@ -89,9 +89,15 @@ export const en = {
         // Vocabulary 섹션 (A) — 전사 정확도를 높이는 AWS Transcribe 커스텀 어휘 이름
         vocabularyHeading: "Vocabulary",
         transcribeVocabularyName: {
-            name: "Transcribe custom vocabulary name",
-            desc: "Name of a custom vocabulary registered in AWS Transcribe for the selected region and language. Leave empty to disable. Create vocabularies in the AWS Console under Transcribe → Custom vocabularies.",
-            placeholder: "my-team-vocab",
+            name: "Custom vocabulary words",
+            desc: "Words and phrases that AWS Transcribe should recognize accurately. One per line. Click 'Sync to AWS' to register them as a Custom Vocabulary.",
+            placeholder: "Kubernetes\nObsidian\nJohn Smith",
+            sync: "Sync to AWS",
+            syncing: "Syncing...",
+            syncSuccess: "Vocabulary synced successfully. It will be used on next transcription.",
+            syncFailed: "Vocabulary sync failed. Check credentials and try again.",
+            syncReady: "Ready",
+            syncPending: "Processing...",
         },
         // Glossary 섹션 (B) — 분석 프롬프트에 삽입되는 사용자 지시
         analysisGlossary: {

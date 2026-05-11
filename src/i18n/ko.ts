@@ -91,9 +91,15 @@ export const ko: Translations = {
         // Vocabulary 섹션 (A) — 전사 정확도를 높이는 AWS Transcribe 커스텀 어휘 이름
         vocabularyHeading: "단어장",
         transcribeVocabularyName: {
-            name: "Transcribe 커스텀 어휘 이름",
-            desc: "선택된 리전과 언어에 맞춰 AWS Transcribe 에 등록해 둔 커스텀 어휘 이름을 입력합니다. 비워 두면 비활성화됩니다. AWS 콘솔의 Transcribe → 사용자 지정 어휘에서 미리 등록하세요.",
-            placeholder: "my-team-vocab",
+            name: "커스텀 단어 목록",
+            desc: "AWS Transcribe 가 정확히 인식해야 할 단어와 구문입니다. 한 줄에 하나씩 입력하세요. 'AWS에 동기화' 버튼을 누르면 Custom Vocabulary 로 등록됩니다.",
+            placeholder: "쿠버네티스\nObsidian\n김철수 팀장",
+            sync: "AWS에 동기화",
+            syncing: "동기화 중...",
+            syncSuccess: "단어장이 동기화되었습니다. 다음 전사부터 적용됩니다.",
+            syncFailed: "단어장 동기화에 실패했습니다. 자격 증명을 확인하고 다시 시도하세요.",
+            syncReady: "준비됨",
+            syncPending: "처리 중...",
         },
         // Glossary 섹션 (B) — 분석 프롬프트에 삽입되는 사용자 지시
         analysisGlossary: {

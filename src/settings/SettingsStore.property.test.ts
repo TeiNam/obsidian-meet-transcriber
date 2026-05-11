@@ -76,6 +76,7 @@ const validSettingsArb: fc.Arbitrary<TranscribeSettings> = fc.record({
 	languageCode: fc.constantFrom<LanguageCode>(...ALLOWED_LANGUAGE_CODES),
 	transcriptFolder: fc.string(),
 	transcribeVocabularyName: fc.string({ maxLength: 200 }),
+	vocabularyPhrases: fc.string(),
 	analysisGlossary: fc.string(),
 });
 

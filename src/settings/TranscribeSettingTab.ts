@@ -41,6 +41,7 @@ import {
 	BedrockModelCatalog,
 	type BedrockCatalogEntry,
 } from "../services/BedrockModelCatalog";
+import { VocabularyManager } from "../services/VocabularyManager";
 import { TranscribeError } from "../types/errors";
 import { FolderSuggest } from "./FolderSuggest";
 import type { SettingsStore } from "./SettingsStore";
@@ -136,6 +137,13 @@ export class TranscribeSettingTab extends PluginSettingTab {
 	private readonly modelCatalog: BedrockModelCatalog;
 
 	/**
+	 * Vocabulary 자동 관리 서비스.
+	 *
+	 * 설정에 입력된 단어 목록을 AWS Custom Vocabulary 로 생성/업데이트/삭제한다.
+	 */
+	private readonly vocabManager: VocabularyManager;
+
+	/**
 	 * 가장 최근에 성공한 모델 카탈로그 조회 결과.
 	 * 드롭다운 재렌더(예: 로케일 변경) 시 네트워크 재호출 없이 즉시 옵션으로 반영하기 위함이다.
 	 */
@@ -148,6 +156,7 @@ export class TranscribeSettingTab extends PluginSettingTab {
 		super(app, plugin);
 		this.transcribePlugin = plugin;
 		this.modelCatalog = new BedrockModelCatalog();
+		this.vocabManager = new VocabularyManager();
 	}
 
 	/**
@@ -606,27 +615,115 @@ export class TranscribeSettingTab extends PluginSettingTab {
 	}
 
 	/**
-	 * AWS Transcribe 커스텀 어휘 이름 필드.
+	 * 단어 목록 textarea + "AWS에 동기화" 버튼.
 	 *
-	 * 사용자가 AWS 콘솔/CLI 로 미리 생성한 Vocabulary 의 이름만 입력한다. 비워 두면
-	 * Transcribe 세션에 `VocabularyName` 을 전달하지 않는다. 최대 길이 200 자(AWS 상한).
+	 * 사용자가 단어를 한 줄에 하나씩 입력하고 동기화 버튼을 누르면
+	 * `VocabularyManager.syncVocabulary()` 를 호출해 AWS Custom Vocabulary 를
+	 * 자동 생성/업데이트한다. 성공 시 `transcribeVocabularyName` 에 이름이 저장되어
+	 * 다음 전사부터 자동 적용된다.
 	 */
 	private renderTranscribeVocabularyNameField(
 		containerEl: HTMLElement,
 		t: Translations,
 	): void {
-		new Setting(containerEl)
+		const setting = new Setting(containerEl)
 			.setName(t.settings.transcribeVocabularyName.name)
-			.setDesc(t.settings.transcribeVocabularyName.desc)
-			.addText((text) => {
-				text.inputEl.setAttribute("maxlength", "200");
-				text.setPlaceholder(t.settings.transcribeVocabularyName.placeholder);
-				text.setValue(this.transcribePlugin.settings.transcribeVocabularyName);
-				text.onChange(async (value) => {
-					this.transcribePlugin.settings.transcribeVocabularyName = value;
-					await this.saveIfValid();
-				});
+			.setDesc(t.settings.transcribeVocabularyName.desc);
+
+		const statusEl = setting.settingEl.createDiv({
+			cls: "transcribe-setting-status",
+		});
+		// 현재 동기화 상태 표시.
+		if (this.transcribePlugin.settings.transcribeVocabularyName.length > 0) {
+			statusEl.setText(
+				`✓ ${t.settings.transcribeVocabularyName.syncReady}: ${this.transcribePlugin.settings.transcribeVocabularyName}`,
+			);
+		}
+
+		setting.addTextArea((ta) => {
+			ta.inputEl.rows = 6;
+			ta.inputEl.classList.add("transcribe-glossary-textarea");
+			ta.setPlaceholder(t.settings.transcribeVocabularyName.placeholder);
+			ta.setValue(this.transcribePlugin.settings.vocabularyPhrases);
+			ta.onChange(async (value) => {
+				this.transcribePlugin.settings.vocabularyPhrases = value;
+				await this.saveIfValid();
 			});
+		});
+
+		setting.addButton((btn) => {
+			btn.setButtonText(t.settings.transcribeVocabularyName.sync);
+			btn.setCta();
+			btn.onClick(() => {
+				void this.syncVocabulary(t, statusEl, btn.buttonEl);
+			});
+		});
+	}
+
+	/**
+	 * "AWS에 동기화" 버튼 클릭 흐름.
+	 */
+	private async syncVocabulary(
+		t: Translations,
+		statusEl: HTMLElement,
+		btnEl: HTMLButtonElement,
+	): Promise<void> {
+		const plugin = this.transcribePlugin;
+
+		// 자격 증명/리전 누락 체크.
+		const missing: string[] = [];
+		if (plugin.settings.accessKeyId.trim().length === 0) missing.push(t.settings.accessKeyId.name);
+		if (plugin.settings.secretAccessKey.trim().length === 0) missing.push(t.settings.secretAccessKey.name);
+		if (plugin.settings.region.trim().length === 0) missing.push(t.settings.region.name);
+		if (missing.length > 0) {
+			new Notice(t.notices.missingSettings(missing));
+			return;
+		}
+
+		btnEl.disabled = true;
+		btnEl.textContent = t.settings.transcribeVocabularyName.syncing;
+		statusEl.setText(t.settings.transcribeVocabularyName.syncing);
+
+		try {
+			const result = await this.vocabManager.syncVocabulary({
+				credentials: {
+					accessKeyId: plugin.settings.accessKeyId,
+					secretAccessKey: plugin.settings.secretAccessKey,
+				},
+				region: plugin.settings.region,
+				languageCode: plugin.settings.languageCode,
+				phrases: plugin.settings.vocabularyPhrases,
+			});
+
+			plugin.settings.transcribeVocabularyName = result.vocabularyName;
+			await this.trySave();
+
+			if (result.status === "READY") {
+				statusEl.setText(
+					`✓ ${t.settings.transcribeVocabularyName.syncReady}: ${result.vocabularyName}`,
+				);
+				new Notice(t.settings.transcribeVocabularyName.syncSuccess);
+			} else if (result.status === "DELETED") {
+				statusEl.setText("");
+				new Notice(t.settings.transcribeVocabularyName.syncSuccess);
+			} else if (result.status === "PENDING") {
+				statusEl.setText(t.settings.transcribeVocabularyName.syncPending);
+			} else {
+				statusEl.setText("");
+				new Notice(t.settings.transcribeVocabularyName.syncFailed);
+			}
+		} catch (err) {
+			statusEl.setText("");
+			if (err instanceof TranscribeError && err.code === "AWS_AUTH") {
+				new Notice(t.notices.awsAuthError);
+			} else {
+				console.error("[TranscribeSettingTab] syncVocabulary failed:", err);
+				new Notice(t.settings.transcribeVocabularyName.syncFailed);
+			}
+		} finally {
+			btnEl.disabled = false;
+			btnEl.textContent = t.settings.transcribeVocabularyName.sync;
+		}
 	}
 
 	// ---------------------------------------------------------------------

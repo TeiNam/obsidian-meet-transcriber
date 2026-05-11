@@ -116,20 +116,29 @@ export interface TranscribeSettings {
 	transcriptFolder: string;
 
 	/**
-	 * AWS Transcribe **커스텀 어휘** 이름(선택).
+	 * AWS Transcribe **커스텀 어휘** 이름(자동 관리).
 	 *
-	 * 사용자가 AWS 콘솔/CLI 로 사전에 생성한 Vocabulary 의 이름만 저장한다.
-	 * 빈 문자열이면 전달하지 않으며, 값이 있으면 Transcribe Streaming 세션 생성 시
-	 * `VocabularyName` 파라미터로 전달되어 STT 가 해당 어휘를 우선 인식한다.
-	 *
-	 * 주의:
-	 * - Vocabulary 는 지정된 AWS 리전에 생성된 것이어야 한다(리전 불일치 시 세션 실패).
-	 * - 전사 언어 코드(`languageCode`) 와 Vocabulary 의 언어가 일치해야 한다.
-	 * - 최대 길이 200 자(AWS 상한). 허용 문자는 영숫자/하이픈/언더스코어.
-	 *
-	 * 관련: AWS `StartStreamTranscription` API 의 `VocabularyName` 파라미터.
+	 * `VocabularyManager.syncVocabulary()` 가 생성/갱신한 Vocabulary 의 이름이 저장된다.
+	 * 사용자가 직접 입력하는 것이 아니라 플러그인이 자동으로 관리한다.
+	 * 빈 문자열이면 전사 시 VocabularyName 을 전달하지 않는다.
 	 */
 	transcribeVocabularyName: string;
+
+	/**
+	 * 사용자가 설정에 입력한 **단어 목록** 원본(한 줄에 하나).
+	 *
+	 * "AWS에 동기화" 버튼을 누르면 이 내용이 `VocabularyManager` 를 통해
+	 * AWS Custom Vocabulary 로 등록된다. 등록 성공 시 `transcribeVocabularyName` 에
+	 * 자동 생성된 이름이 저장되어 전사 시 사용된다.
+	 *
+	 * 예)
+	 * ```
+	 * 쿠버네티스
+	 * Obsidian
+	 * 김철수 팀장
+	 * ```
+	 */
+	vocabularyPhrases: string;
 
 	/**
 	 * 분석 단계에서 Bedrock 모델에 전달할 **용어 사전**(선택).
@@ -168,5 +177,6 @@ export const DEFAULT_SETTINGS: TranscribeSettings = {
 	languageCode: "ko-KR",
 	transcriptFolder: "",
 	transcribeVocabularyName: "",
+	vocabularyPhrases: "",
 	analysisGlossary: "",
 };
