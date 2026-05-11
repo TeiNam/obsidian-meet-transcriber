@@ -421,23 +421,33 @@
  *     Obsidian Setting 의 기본 가로 배치를 세로로 전환하여
  *     textarea 가 설명 아래 전체 너비를 차지하도록 한다.
  * ───────────────────────────────────────────── */
-.setting-item:has(.transcribe-glossary-textarea) {
+.setting-item:has(.transcribe-glossary-textarea),
+.setting-item:has(.transcribe-model-dropdown) {
     flex-direction: column;
     align-items: stretch;
 }
 
-.setting-item:has(.transcribe-glossary-textarea) .setting-item-info {
+.setting-item:has(.transcribe-glossary-textarea) .setting-item-info,
+.setting-item:has(.transcribe-model-dropdown) .setting-item-info {
     max-width: 100%;
     margin-bottom: var(--size-4-2);
 }
 
-.setting-item:has(.transcribe-glossary-textarea) .setting-item-control {
+.setting-item:has(.transcribe-glossary-textarea) .setting-item-control,
+.setting-item:has(.transcribe-model-dropdown) .setting-item-control {
     width: 100%;
     justify-content: stretch;
-    flex-direction: column;
+    flex-direction: row;
+    flex-wrap: wrap;
     gap: var(--size-4-2);
 }
 
 .setting-item:has(.transcribe-glossary-textarea) .transcribe-glossary-textarea {
     width: 100%;
+}
+
+/* 모델 드롭다운 — 전체 너비에서 새로고침 버튼 공간만 빼고 차지 */
+.setting-item:has(.transcribe-model-dropdown) select.dropdown {
+    flex: 1;
+    min-width: 0;
 }

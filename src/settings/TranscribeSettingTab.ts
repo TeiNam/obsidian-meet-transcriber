@@ -436,6 +436,7 @@ export class TranscribeSettingTab extends PluginSettingTab {
 		// 드롭다운 — Setting.addDropdown 을 사용해 Obsidian 의 기본 스타일을 따른다.
 		setting.addDropdown((dd) => {
 			selectEl = dd.selectEl;
+			dd.selectEl.classList.add("transcribe-model-dropdown");
 			this.populateModelDropdown(dd.selectEl, t);
 			dd.selectEl.addEventListener("change", async () => {
 				const value = dd.selectEl.value;
