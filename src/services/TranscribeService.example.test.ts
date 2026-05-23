@@ -455,3 +455,398 @@ describe("TranscribeService.stop — 지정 시간 내 미종료 시 강제 abor
 		service.dispose();
 	});
 });
+
+// =============================================================================
+// v1.1 — 화자 분리 / Segment 분할 / Segment_Id 단조 증가
+// =============================================================================
+//
+// 본 절은 task 20 (design §4.6) 의 신규 동작 3 가지 acceptance criterion 을
+// `aws-sdk-client-mock` + 제어 가능한 fake stream 조합으로 검증한다.
+//
+// - **AC 6.3** — `showSpeakerLabel: true` 인 경우 `StartStreamTranscriptionCommand`
+//   입력에 `ShowSpeakerLabel: true` 와 `EnablePartialResultsStabilization: true` 가
+//   포함되어 호출된다. 미지정/false 의 경우 두 필드는 SDK 인자에 포함되지 않는다
+//   (v1.0 호환).
+// - **AC 6.5** — 단일 Final 응답에 두 명 이상의 화자 (`spk_0`, `spk_1`) 가
+//   섞여 등장하면 `onFinalSegment` 가 화자 구간별로 2 회 호출되며, 각 segment 의
+//   `speakerLabel` 이 `mapSpeakerLabel` 규칙에 따라 `Speaker 1`, `Speaker 2` 로
+//   부여된다.
+// - **AC 13.4 (재해석: design §4.6 Segment_Id 단조 증가)** — 3 개 Final 결과에 대해
+//   `segmentId` 가 1, 2, 3 순서로 부여되고, 동일 `spk_0` 은 같은 표시명을 재사용한다.
+//
+// 테스트 전략:
+// - `aws-sdk-client-mock` 으로 `StartStreamTranscriptionCommand` 호출의 input 을
+//   직접 검증 (AC 6.3). 단, mock 의 `resolves` 는 `TranscriptResultStream` 을
+//   AsyncIterable 로 받아 주므로 `ControlledAsyncIterable` 을 그대로 사용한다.
+// - `clientFactory` 는 매번 새 `TranscribeStreamingClient` 인스턴스를 반환하지만
+//   `mockClient` 가 모든 인스턴스를 가로채기 때문에 mock send 가 호출된다.
+
+import {
+	StartStreamTranscriptionCommand as StartStreamCmd,
+	TranscribeStreamingClient as TranscribeStreamingClientReal,
+	type Item as TranscribeItem,
+} from "@aws-sdk/client-transcribe-streaming";
+import { mockClient } from "aws-sdk-client-mock";
+import { afterAll } from "vitest";
+
+const transcribeMock = mockClient(TranscribeStreamingClientReal);
+
+afterEach(() => {
+	transcribeMock.reset();
+});
+afterAll(() => {
+	transcribeMock.restore();
+});
+
+/**
+ * 화자 라벨 / 시간 정보 / 본문이 포함된 Final `TranscriptEvent` 1 건을 생성한다.
+ *
+ * `Items[]` 는 하나의 `Item` 당 (Content, Speaker, StartTime, EndTime) 만 채워
+ * `emitFinalSegments` 의 화자 그룹화 로직을 결정적으로 구동한다.
+ */
+function makeFinalWithItems(
+	transcript: string,
+	items: ReadonlyArray<{
+		content: string;
+		speaker?: string;
+		startTime?: number;
+		endTime?: number;
+	}>,
+	resultMeta: { startTime?: number; endTime?: number } = {},
+): TranscriptResultStream {
+	const sdkItems: TranscribeItem[] = items.map((it) => ({
+		Content: it.content,
+		Speaker: it.speaker,
+		StartTime: it.startTime,
+		EndTime: it.endTime,
+		Type: "pronunciation",
+	}));
+	return {
+		TranscriptEvent: {
+			Transcript: {
+				Results: [
+					{
+						IsPartial: false,
+						StartTime: resultMeta.startTime,
+						EndTime: resultMeta.endTime,
+						Alternatives: [
+							{
+								Transcript: transcript,
+								Items: sdkItems,
+							},
+						],
+					},
+				],
+			},
+		},
+	} as unknown as TranscriptResultStream;
+}
+
+// -----------------------------------------------------------------------------
+// AC 6.3 — ShowSpeakerLabel / EnablePartialResultsStabilization 전달 검증
+// -----------------------------------------------------------------------------
+
+describe("TranscribeService.start — AC 6.3: ShowSpeakerLabel 전달", () => {
+	it("showSpeakerLabel=true 인 경우 ShowSpeakerLabel/EnablePartialResultsStabilization 이 SDK 인자에 포함된다", async () => {
+		const stream = new ControlledAsyncIterable<TranscriptResultStream>();
+		transcribeMock
+			.on(StartStreamCmd)
+			.resolves({ TranscriptResultStream: stream } as unknown as object);
+
+		// 매 호출마다 새 클라이언트 인스턴스 — `mockClient` 가 가로채므로 동일 동작.
+		const clientFactory: TranscribeClientFactory = () =>
+			new TranscribeStreamingClientReal({ region: "us-east-1" });
+
+		const audioCapture = createAudioCaptureMock();
+		const callbacks = createCallbacks();
+		const service = new TranscribeService(audioCapture, clientFactory, {
+			sessionEstablishTimeoutMs: 2_000,
+			stopTimeoutMs: 200,
+			reconnectDelayMs: 10,
+			maxReconnectAttempts: 0,
+		});
+
+		await service.start({
+			...makeStartParams(callbacks),
+			showSpeakerLabel: true,
+		});
+
+		// 세션이 수립되어 send 가 호출되도록 첫 이벤트 푸시.
+		stream.push(makeTranscriptEvent("안녕", true));
+		await vi.waitFor(() => {
+			expect(callbacks.onSessionEstablished).toHaveBeenCalledTimes(1);
+		});
+
+		// `mockClient.commandCalls(StartStreamCmd)` 로 입력 인자 검증.
+		const calls = transcribeMock.commandCalls(StartStreamCmd);
+		expect(calls.length).toBe(1);
+		const input = calls[0].args[0].input;
+		expect(input.ShowSpeakerLabel).toBe(true);
+		expect(input.EnablePartialResultsStabilization).toBe(true);
+		expect(input.LanguageCode).toBe("ko-KR");
+		expect(input.MediaEncoding).toBe("pcm");
+		expect(input.MediaSampleRateHertz).toBe(16_000);
+
+		// 정리.
+		stream.close();
+		service.dispose();
+	});
+
+	it("showSpeakerLabel 미지정(v1.0 호환) 시 ShowSpeakerLabel/EnablePartialResultsStabilization 이 SDK 인자에 포함되지 않는다", async () => {
+		const stream = new ControlledAsyncIterable<TranscriptResultStream>();
+		transcribeMock
+			.on(StartStreamCmd)
+			.resolves({ TranscriptResultStream: stream } as unknown as object);
+
+		const clientFactory: TranscribeClientFactory = () =>
+			new TranscribeStreamingClientReal({ region: "us-east-1" });
+
+		const audioCapture = createAudioCaptureMock();
+		const callbacks = createCallbacks();
+		const service = new TranscribeService(audioCapture, clientFactory, {
+			sessionEstablishTimeoutMs: 2_000,
+			stopTimeoutMs: 200,
+			reconnectDelayMs: 10,
+			maxReconnectAttempts: 0,
+		});
+
+		// showSpeakerLabel 옵션 없이 v1.0 형태로 호출.
+		await service.start(makeStartParams(callbacks));
+
+		stream.push(makeTranscriptEvent("안녕", true));
+		await vi.waitFor(() => {
+			expect(callbacks.onSessionEstablished).toHaveBeenCalledTimes(1);
+		});
+
+		const calls = transcribeMock.commandCalls(StartStreamCmd);
+		expect(calls.length).toBe(1);
+		const input = calls[0].args[0].input;
+		// 두 필드는 SDK 입력 객체에 키 자체가 없어야 한다 (v1.0 호환).
+		expect(input.ShowSpeakerLabel).toBeUndefined();
+		expect(input.EnablePartialResultsStabilization).toBeUndefined();
+
+		stream.close();
+		service.dispose();
+	});
+});
+
+// -----------------------------------------------------------------------------
+// AC 6.5 — 단일 Final 응답에 두 화자 → segment 분할
+// -----------------------------------------------------------------------------
+
+describe("TranscribeService.start — AC 6.5: 다중 화자 Final 분할", () => {
+	it("단일 Final 에 spk_0 / spk_1 이 섞여 등장하면 onFinalSegment 가 화자별로 2 회 호출된다", async () => {
+		const stream = new ControlledAsyncIterable<TranscriptResultStream>();
+		transcribeMock
+			.on(StartStreamCmd)
+			.resolves({ TranscriptResultStream: stream } as unknown as object);
+
+		const clientFactory: TranscribeClientFactory = () =>
+			new TranscribeStreamingClientReal({ region: "us-east-1" });
+
+		const audioCapture = createAudioCaptureMock();
+		const onFinalSegment = vi.fn();
+		const callbacks: TranscribeCallbacks = {
+			...createCallbacks(),
+			onFinalSegment,
+		};
+
+		const service = new TranscribeService(audioCapture, clientFactory, {
+			sessionEstablishTimeoutMs: 2_000,
+			stopTimeoutMs: 200,
+			reconnectDelayMs: 10,
+			maxReconnectAttempts: 0,
+		});
+
+		await service.start({
+			...makeStartParams(callbacks),
+			showSpeakerLabel: true,
+		});
+
+		// 단일 Final: "안녕하세요 반갑습니다" — spk_0 가 "안녕하세요" 발화,
+		// spk_1 이 "반갑습니다" 발화. 두 화자가 섞인 단일 Result.
+		stream.push(
+			makeFinalWithItems(
+				"안녕하세요 반갑습니다",
+				[
+					{
+						content: "안녕하세요",
+						speaker: "spk_0",
+						startTime: 0.5,
+						endTime: 1.5,
+					},
+					{
+						content: "반갑습니다",
+						speaker: "spk_1",
+						startTime: 2.0,
+						endTime: 3.0,
+					},
+				],
+				{ startTime: 0.5, endTime: 3.0 },
+			),
+		);
+
+		await vi.waitFor(() => {
+			expect(onFinalSegment).toHaveBeenCalledTimes(2);
+		});
+
+		// 첫 segment: spk_0 → "Speaker 1".
+		const seg1 = onFinalSegment.mock.calls[0][0];
+		expect(seg1.segmentId).toBe(1);
+		expect(seg1.speakerLabel).toBe("Speaker 1");
+		expect(seg1.text).toBe("안녕하세요");
+		expect(seg1.startSeconds).toBe(0.5);
+		expect(seg1.endSeconds).toBe(1.5);
+
+		// 두 번째 segment: spk_1 → "Speaker 2".
+		const seg2 = onFinalSegment.mock.calls[1][0];
+		expect(seg2.segmentId).toBe(2);
+		expect(seg2.speakerLabel).toBe("Speaker 2");
+		expect(seg2.text).toBe("반갑습니다");
+		expect(seg2.startSeconds).toBe(2.0);
+		expect(seg2.endSeconds).toBe(3.0);
+
+		// v1.0 호환 onFinal 은 Final 전체 본문으로 1 회만 호출.
+		expect(callbacks.onFinal).toHaveBeenCalledTimes(1);
+		expect(callbacks.onFinal).toHaveBeenCalledWith("안녕하세요 반갑습니다");
+
+		stream.close();
+		service.dispose();
+	});
+
+	it("Items 가 누락되어 화자 정보가 없는 Final 에서는 단일 segment 가 발사되며 speakerLabel = undefined 이다 (Requirement 6.7)", async () => {
+		const stream = new ControlledAsyncIterable<TranscriptResultStream>();
+		transcribeMock
+			.on(StartStreamCmd)
+			.resolves({ TranscriptResultStream: stream } as unknown as object);
+
+		const clientFactory: TranscribeClientFactory = () =>
+			new TranscribeStreamingClientReal({ region: "us-east-1" });
+
+		const audioCapture = createAudioCaptureMock();
+		const onFinalSegment = vi.fn();
+		const callbacks: TranscribeCallbacks = {
+			...createCallbacks(),
+			onFinalSegment,
+		};
+
+		const service = new TranscribeService(audioCapture, clientFactory, {
+			sessionEstablishTimeoutMs: 2_000,
+			stopTimeoutMs: 200,
+			reconnectDelayMs: 10,
+			maxReconnectAttempts: 0,
+		});
+
+		await service.start(makeStartParams(callbacks));
+
+		// `makeTranscriptEvent` 는 Items 를 넣지 않으므로 fallback 경로가 동작한다.
+		stream.push(makeTranscriptEvent("화자 정보 없는 본문", false));
+
+		await vi.waitFor(() => {
+			expect(onFinalSegment).toHaveBeenCalledTimes(1);
+		});
+
+		const seg = onFinalSegment.mock.calls[0][0];
+		expect(seg.segmentId).toBe(1);
+		expect(seg.speakerLabel).toBeUndefined();
+		expect(seg.text).toBe("화자 정보 없는 본문");
+
+		stream.close();
+		service.dispose();
+	});
+});
+
+// -----------------------------------------------------------------------------
+// AC 13.4 (design §4.6 Segment_Id 단조 증가) — 3 개 Final → segmentId 1,2,3
+// -----------------------------------------------------------------------------
+
+describe("TranscribeService.start — AC 13.4: Segment_Id 단조 증가 + 화자 라벨 안정성", () => {
+	it("3 개 Final 결과에 대해 segmentId 가 1,2,3 순서로 부여되고 동일 spk_0 은 같은 표시명을 재사용한다", async () => {
+		const stream = new ControlledAsyncIterable<TranscriptResultStream>();
+		transcribeMock
+			.on(StartStreamCmd)
+			.resolves({ TranscriptResultStream: stream } as unknown as object);
+
+		const clientFactory: TranscribeClientFactory = () =>
+			new TranscribeStreamingClientReal({ region: "us-east-1" });
+
+		const audioCapture = createAudioCaptureMock();
+		const onFinalSegment = vi.fn();
+		const callbacks: TranscribeCallbacks = {
+			...createCallbacks(),
+			onFinalSegment,
+		};
+
+		const service = new TranscribeService(audioCapture, clientFactory, {
+			sessionEstablishTimeoutMs: 2_000,
+			stopTimeoutMs: 200,
+			reconnectDelayMs: 10,
+			maxReconnectAttempts: 0,
+		});
+
+		await service.start({
+			...makeStartParams(callbacks),
+			showSpeakerLabel: true,
+		});
+
+		// 3 개의 단일 화자 Final: spk_0 → spk_1 → spk_0.
+		stream.push(
+			makeFinalWithItems("첫 번째", [
+				{
+					content: "첫 번째",
+					speaker: "spk_0",
+					startTime: 0.0,
+					endTime: 1.0,
+				},
+			]),
+		);
+		stream.push(
+			makeFinalWithItems("두 번째", [
+				{
+					content: "두 번째",
+					speaker: "spk_1",
+					startTime: 1.5,
+					endTime: 2.5,
+				},
+			]),
+		);
+		stream.push(
+			makeFinalWithItems("세 번째", [
+				{
+					content: "세 번째",
+					speaker: "spk_0",
+					startTime: 3.0,
+					endTime: 4.0,
+				},
+			]),
+		);
+
+		await vi.waitFor(() => {
+			expect(onFinalSegment).toHaveBeenCalledTimes(3);
+		});
+
+		const segments = onFinalSegment.mock.calls.map((c) => c[0]);
+
+		// Segment_Id 단조 증가 (Requirement 13.4, 13.5).
+		expect(segments.map((s) => s.segmentId)).toEqual([1, 2, 3]);
+
+		// 화자 라벨 안정성 (Requirement 6.4): spk_0 은 항상 Speaker 1, spk_1 은 Speaker 2.
+		expect(segments[0].speakerLabel).toBe("Speaker 1");
+		expect(segments[1].speakerLabel).toBe("Speaker 2");
+		expect(segments[2].speakerLabel).toBe("Speaker 1");
+
+		// 본문 검증.
+		expect(segments.map((s) => s.text)).toEqual([
+			"첫 번째",
+			"두 번째",
+			"세 번째",
+		]);
+
+		// `TranscriptBuffer.getSegments()` 도 같은 순서/segmentId 를 보관한다.
+		const bufferedSegments = service.getTranscriptBuffer().getSegments();
+		expect(bufferedSegments.map((s) => s.segmentId)).toEqual([1, 2, 3]);
+
+		stream.close();
+		service.dispose();
+	});
+});

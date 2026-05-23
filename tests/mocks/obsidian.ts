@@ -638,6 +638,65 @@ export class Notice {
 }
 
 // ---------------------------------------------------------------------------
+// Modal
+// ---------------------------------------------------------------------------
+
+/**
+ * Obsidian `Modal` 의 테스트용 스텁.
+ *
+ * 실제 구현은 `app.modalContainerEl` 위에 백드롭과 모달 컨테이너를 만들고 ESC 키로
+ * 닫히는 등 다양한 동작을 한다. 테스트 환경에서는 다음만 흉내낸다:
+ * - `contentEl` / `titleEl` / `modalEl` / `containerEl` DOM 노드를 미리 생성.
+ * - `open()` 호출 시 `containerEl` 을 `document.body` 에 부착하고 `onOpen()` 호출.
+ * - `close()` 호출 시 `onClose()` 호출 후 `containerEl` 을 분리.
+ *
+ * 이 정도면 모달 구현이 `createEl`/`setText`/`onClick` 으로 작성한 DOM 을
+ * jsdom 에서 그대로 검증할 수 있다.
+ */
+export class Modal {
+	app: App;
+	containerEl: HTMLElement;
+	modalEl: HTMLElement;
+	titleEl: HTMLElement;
+	contentEl: HTMLElement;
+
+	constructor(app: App) {
+		this.app = app;
+		this.containerEl = document.createElement("div");
+		this.containerEl.className = "modal-container";
+		this.modalEl = document.createElement("div");
+		this.modalEl.className = "modal";
+		this.titleEl = document.createElement("div");
+		this.titleEl.className = "modal-title";
+		this.contentEl = document.createElement("div");
+		this.contentEl.className = "modal-content";
+		this.modalEl.appendChild(this.titleEl);
+		this.modalEl.appendChild(this.contentEl);
+		this.containerEl.appendChild(this.modalEl);
+	}
+
+	open(): void {
+		document.body.appendChild(this.containerEl);
+		this.onOpen();
+	}
+
+	close(): void {
+		this.onClose();
+		if (this.containerEl.parentNode) {
+			this.containerEl.parentNode.removeChild(this.containerEl);
+		}
+	}
+
+	onOpen(): void {
+		/* override */
+	}
+
+	onClose(): void {
+		/* override */
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Network — requestUrl (stub)
 // ---------------------------------------------------------------------------
 

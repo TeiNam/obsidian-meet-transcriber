@@ -18,6 +18,9 @@ type CreateElOptions = {
 	cls?: string | string[];
 	text?: string;
 	attr?: Record<string, string | number | boolean>;
+	// Obsidian 실제 API 는 `<option>` / `<input>` 등에서 자주 쓰이도록 `value` 를
+	// top-level 옵션으로 받아 DOM 속성에 직접 매핑한다. 폴리필도 동일하게 지원한다.
+	value?: string;
 };
 
 /**
@@ -53,6 +56,13 @@ function installObsidianDomExtensions(): void {
 			for (const [name, value] of Object.entries(options.attr)) {
 				el.setAttribute(name, String(value));
 			}
+		}
+		// Obsidian 실 API 호환: `<option value="...">` 처럼 `value` 가 DOM 속성과
+		// 프로퍼티 양쪽에 반영되어야 select.options[i].value 가 우리가 설정한 값을
+		// 돌려준다 (jsdom 에서는 setAttribute 만으로도 동작하지만, 명시적으로 둘 다 세팅).
+		if (options?.value !== undefined) {
+			el.setAttribute("value", options.value);
+			(el as unknown as { value: string }).value = options.value;
 		}
 		this.appendChild(el);
 		return el;

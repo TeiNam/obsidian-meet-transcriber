@@ -179,3 +179,82 @@ describe("createI18n", () => {
 		expect(table).toBe(en);
 	});
 });
+
+// -----------------------------------------------------------------------------
+// task 28 — 키 셋 정합성 / 회귀 게이트
+// -----------------------------------------------------------------------------
+
+/**
+ * 두 객체가 정확히 같은 키 트리(중첩 포함) 를 갖는지 재귀적으로 비교하기 위해
+ * 모든 leaf 의 dot-notation 경로를 수집한다.
+ *
+ * - 함수 값 (예: `notices.missingSettings`, `sidebar.costCounter`) 은 leaf 로 간주하여
+ *   하위 키를 비교하지 않는다 (런타임 호출 시그니처는 `Translations` 타입이 보장).
+ * - 두 쪽 모두 plain object 인 경우에만 한 단계 더 내려간다.
+ *
+ * 실패 시 어떤 경로(예: `settings.translation.targetLanguage.options.fr`) 에서 어긋났는지
+ * dot-notation 으로 나타내어 디버깅을 쉽게 한다.
+ */
+function collectKeyPaths(
+	value: unknown,
+	prefix: ReadonlyArray<string> = [],
+): string[] {
+	if (
+		value === null ||
+		typeof value !== "object" ||
+		Array.isArray(value) ||
+		typeof value === "function"
+	) {
+		return [prefix.join(".")];
+	}
+
+	const obj = value as Record<string, unknown>;
+	const paths: string[] = [];
+	for (const key of Object.keys(obj)) {
+		paths.push(...collectKeyPaths(obj[key], [...prefix, key]));
+	}
+	return paths;
+}
+
+describe("task 28 — i18n 키 셋 정합성", () => {
+	it("en.ts 와 ko.ts 가 정확히 동일한 키 트리를 갖는다 (재귀 비교)", () => {
+		// 단순 최상위 비교만으로는 `settings.translation.targetLanguage.options.fr` 같은
+		// 깊은 누락을 잡을 수 없다. `Translations` 타입이 컴파일 타임에 누락을 차단하지만,
+		// 런타임에서도 한 번 더 회귀 게이트를 둔다 (Requirement 1.9, 13.14, 14.8).
+		const enPaths = collectKeyPaths(en).sort();
+		const koPaths = collectKeyPaths(ko).sort();
+
+		expect(koPaths).toEqual(enPaths);
+	});
+
+	it("구 키 `notices.translationLocalNeedsNetwork` 는 두 로케일 모두에서 제거되었다", () => {
+		// v1.1 에서 의미가 `translationOfflineUnsupported` 로 교체되었으므로, 구 키가
+		// 실수로 다시 추가되지 않도록 회귀 게이트를 둔다 (Requirement 14.8, task 28).
+		// 타입 시스템상 존재하지 않는 키이므로 `as` 로 우회하여 런타임 부재를 검증한다.
+		const enNotices = en.notices as Record<string, unknown>;
+		const koNotices = ko.notices as Record<string, unknown>;
+
+		expect(enNotices.translationLocalNeedsNetwork).toBeUndefined();
+		expect(koNotices.translationLocalNeedsNetwork).toBeUndefined();
+		expect("translationLocalNeedsNetwork" in en.notices).toBe(false);
+		expect("translationLocalNeedsNetwork" in ko.notices).toBe(false);
+	});
+
+	it("v1.1 신규 모드 게이트 키 4종이 두 로케일 모두에 존재한다", () => {
+		// Requirement 14.8 에 정의된 신규 키들의 존재를 양 로케일에서 명시 검증.
+		// 컴파일 타임 누락 검출 외에, 키 이름의 회귀(rename 등) 도 잡는다.
+		const requiredKeys = [
+			"translationOfflineUnsupported",
+			"analysisOfflineUnsupported",
+			"tooltipOnlineOnlyFeature",
+			"tooltipAnalysisOfflineDisabled",
+		] as const;
+
+		for (const key of requiredKeys) {
+			expect(en.notices[key]).toBeDefined();
+			expect(typeof en.notices[key]).toBe("string");
+			expect(ko.notices[key]).toBeDefined();
+			expect(typeof ko.notices[key]).toBe("string");
+		}
+	});
+});

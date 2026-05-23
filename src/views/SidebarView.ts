@@ -10,16 +10,31 @@
 
 import { ItemView, setIcon, type App, type TFile, type WorkspaceLeaf } from "obsidian";
 import type { Translations } from "../i18n";
+import type { Transcript_Segment } from "../domain/segments";
 import type { BedrockCatalogEntry } from "../services/BedrockModelCatalog";
 import {
 	computeButtonStates,
 	type ButtonStates,
 } from "../state/ButtonStatePolicy";
 import type { StreamingState } from "../state/StreamingStateMachine";
-import type { LanguageCode } from "../types/settings";
+import type {
+	Backend_Selection_Mode,
+	Curated_Target_Language,
+	LanguageCode,
+	Translation_Output_Format,
+} from "../types/settings";
 import {
 	renderSidebarInlineControls,
 } from "./SidebarInlineControls";
+import {
+	appendFinalLine as appendFinalLineDom,
+	renderSpeakerCapacityNotice,
+	renderThrottleIndicator,
+	renderTranslationCostCounter,
+	type SpeakerCapacityNoticeHandle,
+	type ThrottleIndicatorHandle,
+	type TranslationCostCounterHandle,
+} from "./SidebarStatusExtras";
 import {
 	formatRelativeMtime,
 	formatTranscriptDisplayName,
@@ -122,6 +137,53 @@ export interface TranscribePluginLike {
 	getAvailableModels(): BedrockCatalogEntry[];
 	/** 자격 증명/리전으로 Bedrock 카탈로그를 AWS 에서 재조회한다. 실패 시 throw. */
 	refreshAvailableModels(): Promise<BedrockCatalogEntry[]>;
+
+	// ─ v1.1 신규 (task 24) — 사이드바 인라인 미러 컨트롤 ─
+
+	/** 현재 설정의 화자 분리 활성 여부 (Requirement 6.2). */
+	getCurrentSpeakerDiarizationEnabled(): boolean;
+	/** 화자 분리 토글 — 설정 탭과 양방향 미러 동기화 (Requirement 6.2). */
+	setSpeakerDiarizationEnabled(enabled: boolean): Promise<void> | void;
+	/** 현재 설정의 실시간 번역 활성 여부 (Requirement 13.2). */
+	getCurrentTranslationEnabled(): boolean;
+	/** 번역 토글 — 설정 탭과 양방향 미러 동기화 (Requirement 13.2). */
+	setTranslationEnabled(enabled: boolean): Promise<void> | void;
+	/** 현재 설정의 번역 대상 언어 (Requirement 13.3). */
+	getCurrentTranslationTargetLanguage(): Curated_Target_Language;
+	/** 번역 대상 언어 — 설정 탭과 양방향 미러 동기화. */
+	setTranslationTargetLanguage(
+		lang: Curated_Target_Language,
+	): Promise<void> | void;
+	/** 현재 설정의 번역 출력 형식 (Requirement 13.7). */
+	getCurrentTranslationOutputFormat(): Translation_Output_Format;
+	/** 번역 출력 형식 — inline / none. */
+	setTranslationOutputFormat(
+		format: Translation_Output_Format,
+	): Promise<void> | void;
+	/**
+	 * 현재 설정의 백엔드 선택 모드 (Requirement 14.2, 14.3).
+	 *
+	 * `local-only` 일 때 사이드바는 idle 상태에서도 4 개 컨트롤(번역 토글, 번역
+	 * 대상 언어 드롭다운, 화자 분리 토글, AI 분석 버튼) 을 disabled 로 렌더링한다.
+	 */
+	getCurrentBackendSelectionMode(): Backend_Selection_Mode;
+	/**
+	 * 백엔드 선택 모드 변경을 설정에 반영하고 저장한다 (task 33).
+	 *
+	 * 사이드바 백엔드 드롭다운에서 즉시 모드를 전환할 수 있도록 plugin 이 노출한다.
+	 * 저장 직후 인라인 컨트롤 disabled / 활성 엔진 표시가 갱신되어야 하므로
+	 * 호출 측은 본 메서드가 resolve 된 뒤 `view.render()` 를 트리거한다.
+	 */
+	setBackendSelectionMode(
+		mode: Backend_Selection_Mode,
+	): Promise<void> | void;
+	/**
+	 * 현재 설정의 로컬 Whisper 모델 식별자 (task 33).
+	 *
+	 * 활성 엔진 표시 라벨에서 local 백엔드일 때 모델명을 노출하기 위해 plugin 이
+	 * 그대로 전달한다. 빈 문자열은 "미선택" 으로 간주한다.
+	 */
+	getCurrentLocalModelId(): string;
 }
 
 /**
@@ -154,6 +216,30 @@ export class SidebarView extends ItemView {
 	/** 현재 partial 텍스트(읽기 모드에서 committed 뒤에 뮤트로 표시). */
 	private partialText = "";
 
+	/**
+	 * 활성 세션의 백엔드 런타임 override (Requirement 14.4, 14.6).
+	 *
+	 * `setOnlineOnlyControlsEnabled` 가 호출되면 본 필드를 갱신하여 idle 시점의
+	 * settings 기반 게이트 결정을 한 단계 좁힌다. design §4.8 의 접근법 (A) — 런타임
+	 * override 필드 — 를 채택해, settings.backendSelectionMode 만 보고는 알 수 없는
+	 * "auto 모드인데 활성 백엔드가 local 로 결정된 세션" 케이스 (Requirement 14.4) 를
+	 * 표현한다.
+	 *
+	 * - `null`: override 없음. settings 기반 idle 게이트 결정만 적용.
+	 * - `true`: 4 개 컨트롤 활성화 (cloud 백엔드 활성 세션).
+	 * - `false`: 4 개 컨트롤 모두 강제 disabled + 툴팁 부착 (local 백엔드 활성 세션).
+	 */
+	private onlineOnlyControlsRuntimeEnabled: boolean | null = null;
+
+	/**
+	 * 분석 버튼 단독 disabled 강제 플래그 (Requirement 14.6).
+	 *
+	 * `auto` 모드의 인-세션 폴백 시점에 호출되어, 폴백 직후부터 세션 종료까지 분석 버튼만
+	 * disabled 로 강제한다. 번역/화자 분리 토글은 이미 세션 시작 시점에 disabled 로
+	 * 렌더링되어 있으므로 (Requirement 14.4) 별도 강제 불필요.
+	 */
+	private analysisButtonForceDisabled = false;
+
 	// ──────────────────────────────────────────────────────────
 	// DOM 참조 (render()마다 재생성)
 	// ──────────────────────────────────────────────────────────
@@ -174,6 +260,13 @@ export class SidebarView extends ItemView {
 	private partialSpan: HTMLSpanElement | null = null;
 	private editorTextareaEl: HTMLTextAreaElement | null = null;
 	private recentListEl: HTMLDivElement | null = null;
+
+	// TASK 25 신규 위젯 핸들 — 가시성 변경 시 DOM 재생성 없이 클래스 토글만 수행.
+	private speakerCapacityHandle: SpeakerCapacityNoticeHandle | null = null;
+	private translationCostHandle: TranslationCostCounterHandle | null = null;
+	private throttleIndicatorHandle: ThrottleIndicatorHandle | null = null;
+	/** Final 라인 누적 컨테이너 (`appendFinalLine`). 읽기 모드에서만 유효. */
+	private lineContainerEl: HTMLDivElement | null = null;
 
 	/**
 	 * 인라인 컨트롤(언어/모델) 렌더 결과 핸들.
@@ -443,6 +536,11 @@ export class SidebarView extends ItemView {
 	 * 뷰 내부 플래그와 `plugin.getEnvironmentInputs()`의 값을 합쳐
 	 * `computeButtonStates`에 전달한다. 순수 함수 결과만으로 DOM을 갱신하므로
 	 * 호출 순서/빈도에 대해 멱등성(idempotent)을 가진다.
+	 *
+	 * 모드 게이트 (Requirement 14.2): `Backend_Selection_Mode === "local-only"`
+	 * 일 때 분석 버튼은 idle 상태에서도 disabled 로 강제 표시되며 툴팁
+	 * `tooltipOnlineOnlyFeature` 가 부착된다. 본 게이트는 `ButtonStatePolicy` 의
+	 * 결과를 한 번 더 좁히는 형태로 적용된다(정책 함수는 순수성 유지).
 	 */
 	refreshButtons(): void {
 		if (!this.startStopBtn || !this.editBtn || !this.analyzeBtn) {
@@ -468,8 +566,38 @@ export class SidebarView extends ItemView {
 		this.editBtn.disabled = !states.edit.enabled;
 		this.editBtn.setText(this.plugin.t.buttons.edit);
 
-		this.analyzeBtn.disabled = !states.analyze.enabled;
+		// 모드 게이트 (Requirement 14.2, 14.4, 14.6) — `local-only` 또는 활성 세션의
+		// 백엔드가 `local` 인 경우 분석 버튼을 강제 비활성. settings 의 저장값은 변경하지
+		// 않으며, 클라우드 모드 복귀 시 정책 결과가 그대로 살아난다.
+		// 우선순위:
+		//   1. 런타임 override(`onlineOnlyControlsRuntimeEnabled === false`) — 활성 세션 게이트.
+		//   2. `analysisButtonForceDisabled` — auto 폴백 후 분석 버튼 단독 비활성.
+		//   3. settings 기반 idle 게이트 (`local-only`).
+		const idleGate =
+			this.plugin.getCurrentBackendSelectionMode() === "local-only";
+		const runtimeGate = this.onlineOnlyControlsRuntimeEnabled === false;
+		const offlineGated =
+			runtimeGate || this.analysisButtonForceDisabled || idleGate;
+		const analyzeEnabled = states.analyze.enabled && !offlineGated;
+		this.analyzeBtn.disabled = !analyzeEnabled;
 		this.analyzeBtn.setText(this.plugin.t.buttons.analyze);
+		if (offlineGated) {
+			// 분석 버튼 단독 비활성 사유면 전용 툴팁, 4 종 일괄 사유면 공통 툴팁 사용.
+			const tooltip =
+				this.analysisButtonForceDisabled && !runtimeGate && !idleGate
+					? this.plugin.t.notices.tooltipAnalysisOfflineDisabled
+					: this.plugin.t.notices.tooltipOnlineOnlyFeature;
+			this.analyzeBtn.setAttribute("aria-label", tooltip);
+			this.analyzeBtn.setAttribute("title", tooltip);
+			this.analyzeBtn.setAttribute(
+				"data-disabled-reason",
+				"offline-mode",
+			);
+		} else {
+			this.analyzeBtn.removeAttribute("aria-label");
+			this.analyzeBtn.removeAttribute("title");
+			this.analyzeBtn.removeAttribute("data-disabled-reason");
+		}
 
 		// 복사 아이콘: 전사 보드 내부에 플로팅. 본문이 있고 편집/분석 중이 아닐 때만 활성.
 		// 편집 모드에서는 텍스트 보드 자체가 textarea 로 대체되므로 이 아이콘은 DOM 에서 사라져 있다.
@@ -477,6 +605,112 @@ export class SidebarView extends ItemView {
 			const hasText = this.currentDisplayedText().length > 0;
 			this.copyBtn.disabled = !hasText || this.isAnalyzing;
 		}
+	}
+
+	// ──────────────────────────────────────────────────────────
+	// TASK 25 신규 공개 API — 라인 단위 렌더 / status row 위젯 토글
+	// ──────────────────────────────────────────────────────────
+
+	/**
+	 * 화자 라벨이 부여된 Final segment 를 한 라인으로 추가한다 (Requirement 4.4, 4.5, 6.2, 13.5).
+	 *
+	 * 기존 `commitFinal(text)` 와 달리 segment 메타데이터(화자, segmentId)를 그대로
+	 * 보존해 화자별 색상 클래스 + 번역 placeholder 가 함께 렌더된다. main.ts (TASK 26)
+	 * 의 `onFinalSegment` 콜백이 본 메서드를 호출하고, 반환받은 placeholder DOM 을
+	 * `Translation_Service` 큐에 키로 등록한다 (Requirement 13.4).
+	 *
+	 * 편집 모드 또는 라인 컨테이너 미준비 상태에서 호출되면 detached 라인을 반환해
+	 * 큐의 라이프사이클은 깨지지 않게 한다 (Requirement 13.5 표시 순서 보장).
+	 *
+	 * @returns 라인 DOM 노드. `translationEnabled === true` 인 경우 placeholder 자식
+	 *          노드(`.translation-line`)도 함께 생성된다.
+	 */
+	appendFinalLine(
+		segment: Transcript_Segment,
+		options: { translationEnabled: boolean },
+	): HTMLElement {
+		const container = this.lineContainerEl;
+		if (!container) {
+			const detached = document.createElement("div");
+			detached.addClass("line");
+			return detached;
+		}
+		const { lineEl } = appendFinalLineDom(container, segment, options);
+		this.applyEmptyState();
+		this.scrollToBottom();
+		return lineEl;
+	}
+
+	/**
+	 * 누적 번역 문자 수를 status row 비용 카운터에 반영한다 (Requirement 13.9).
+	 *
+	 * 첫 호출 시점에 카운터가 hidden 이면 자동으로 노출시킨다 — 비활성화는 main.ts 가
+	 * `translationEnabled === false` 시점에 직접 처리한다 (DOM 자체는 보존).
+	 */
+	updateCostCounter(charCount: number): void {
+		const handle = this.translationCostHandle;
+		if (!handle) return;
+		handle.update(charCount);
+		handle.setEnabled(true);
+	}
+
+	/**
+	 * 청크 결과 지연 인디케이터의 가시성을 토글한다 (Requirement 10.2).
+	 *
+	 * `Local_Whisper_Service` 가 청크 추론이 200ms 를 초과한 시점에 `true` 로,
+	 * 결과 도착 직후 `false` 로 호출한다.
+	 */
+	showThrottleIndicator(active: boolean): void {
+		this.throttleIndicatorHandle?.setActive(active);
+	}
+
+	/**
+	 * 화자 분리 활성/비활성에 따라 "최대 10명 동시 인식" 안내 라벨을 토글한다
+	 * (Requirement 6.8).
+	 */
+	showSpeakerCapacityNotice(visible: boolean): void {
+		this.speakerCapacityHandle?.setVisible(visible);
+	}
+
+	/**
+	 * 4 개 온라인-전용 컨트롤(번역 토글, 번역 대상 언어 드롭다운, 화자 분리 토글, AI
+	 * 분석 버튼) 의 모드 게이트 상태를 통지한다 (Requirement 14.2, 14.4).
+	 *
+	 * 호출 시점:
+	 *  - 세션 시작 직후 활성 백엔드가 결정된 시점 (cloud 면 `true`, local 이면 `false`).
+	 *  - 세션 종료 시점에 호출 측이 idle 상태로 복귀하려면 `true` 로 호출한다 (idle
+	 *    게이트는 settings 기반 결정으로 자동 적용됨).
+	 *
+	 * 효과:
+	 *  - `enabled === false`: 4 개 컨트롤이 disabled 로 강제 렌더되며 툴팁 부착.
+	 *    인라인 컨트롤은 `render()` 호출로 다시 그려야 토글 disabled 가 반영되므로
+	 *    본 메서드는 `render()` 도 트리거한다.
+	 *  - `enabled === true`: 런타임 override 를 해제. settings 기반 idle 게이트만 적용.
+	 *
+	 * 사용자가 저장한 설정값(`translationEnabled`, `speakerDiarizationEnabled`) 자체는
+	 * 변경하지 않는다 (Requirement 14.2 의 "표시만 OFF, 저장값 변경 금지").
+	 */
+	setOnlineOnlyControlsEnabled(enabled: boolean): void {
+		this.onlineOnlyControlsRuntimeEnabled = enabled;
+		// 인라인 컨트롤 disabled 상태는 render 시점에 평가되므로 다시 그린다. 본 메서드의
+		// 호출 빈도(세션 시작/종료 시점) 가 낮아 전체 render 비용은 무시 가능하다.
+		this.render();
+	}
+
+	/**
+	 * 분석 버튼 단독 모드 게이트 통지 (Requirement 14.6).
+	 *
+	 * `auto` 모드의 인-세션 폴백 시점에 호출된다. 이미 세션 시작 시점에는 클라우드로
+	 * 결정되어 4 개 컨트롤이 활성화된 상태였는데, 폴백 직후부터 세션 종료까지 분석 버튼만
+	 * disabled 로 강제하기 위함이다.
+	 *
+	 * 본 메서드는 `analysisButtonForceDisabled` 플래그만 갱신하고 `refreshButtons()` 를
+	 * 트리거한다. 4 개 컨트롤 일괄 비활성화가 함께 필요하면 호출 측이
+	 * `setOnlineOnlyControlsEnabled(false)` 도 별도로 호출해야 한다.
+	 */
+	setAnalysisButtonEnabled(enabled: boolean): void {
+		this.analysisButtonForceDisabled = !enabled;
+		this.refreshButtons();
 	}
 
 	// ──────────────────────────────────────────────────────────
@@ -489,12 +723,34 @@ export class SidebarView extends ItemView {
 	 * 플러그인 인스턴스가 `SidebarInlineControlsHost` 계약을 그대로 이행하므로
 	 * 그대로 host 로 전달한다. 모듈이 반환하는 `refreshModelOptions` 핸들은
 	 * 모델 카탈로그 갱신 후 드롭다운만 다시 채울 때 사용된다.
+	 *
+	 * 모드 게이트 (Requirement 14.4): `onlineOnlyControlsRuntimeEnabled === false` 인
+	 * 경우 host 의 `getCurrentBackendSelectionMode()` 가 어떤 값을 반환하든 inline
+	 * controls 가 `local-only` 와 동일하게 disabled 처리되도록, host 를 얇게 wrap 해서
+	 * 해당 메서드만 `"local-only"` 를 반환하도록 합성한다. 다른 getter/setter 는
+	 * 프로토타입 체인을 통해 그대로 전달한다.
 	 */
 	private renderInlineControls(root: HTMLElement): void {
-		this.inlineControlsHandle = renderSidebarInlineControls(
-			root,
-			this.plugin,
-		);
+		const host =
+			this.onlineOnlyControlsRuntimeEnabled === false
+				? this.wrapHostWithLocalOnlyOverride(this.plugin)
+				: this.plugin;
+		this.inlineControlsHandle = renderSidebarInlineControls(root, host);
+	}
+
+	/**
+	 * 호스트의 `getCurrentBackendSelectionMode` 만 `"local-only"` 로 강제하는 얇은
+	 * 래퍼를 생성한다. 그 외 메서드/필드는 프로토타입 체인을 통해 원본 객체로 위임한다.
+	 *
+	 * 본 래퍼는 inline controls 가 한 번 그려지는 동안만 살아 있으며, render 다음
+	 * 호출 시 새로 만들어진다 — 게이트 상태 전환을 별도 캐싱 없이 즉시 반영한다.
+	 */
+	private wrapHostWithLocalOnlyOverride(
+		host: TranscribePluginLike,
+	): TranscribePluginLike {
+		const wrapper = Object.create(host) as TranscribePluginLike;
+		wrapper.getCurrentBackendSelectionMode = () => "local-only";
+		return wrapper;
 	}
 
 	/**
@@ -534,6 +790,20 @@ export class SidebarView extends ItemView {
 		if (!this.reconnecting) {
 			this.reconnectLabelEl.addClass("is-hidden");
 		}
+
+		// TASK 25 — status row 부가 위젯 (모두 기본 hidden, 외부 setter 로 토글).
+		this.speakerCapacityHandle = renderSpeakerCapacityNotice(
+			status,
+			this.plugin.t,
+		);
+		this.translationCostHandle = renderTranslationCostCounter(
+			status,
+			this.plugin.t,
+		);
+		this.throttleIndicatorHandle = renderThrottleIndicator(
+			status,
+			this.plugin.t,
+		);
 	}
 
 	/**
@@ -612,6 +882,12 @@ export class SidebarView extends ItemView {
 			cls: "committed",
 		});
 		this.partialSpan = this.transcriptTextEl.createSpan({ cls: "partial" });
+		// TASK 25 — `appendFinalLine` 으로 추가되는 라인 누적 컨테이너.
+		// committed/partial span 과 분리해 두어 v1.0 호환 경로와 v1.1 신규
+		// 경로가 서로 간섭하지 않게 한다.
+		this.lineContainerEl = this.transcriptTextEl.createDiv({
+			cls: "line-container",
+		});
 
 		// 복사 아이콘 버튼 — 전사 보드 우상단 플로팅. 스트리밍 중에도 현재까지 본문 복사 가능.
 		this.copyBtn = wrapper.createEl("button", {
@@ -644,6 +920,7 @@ export class SidebarView extends ItemView {
 		this.emptyHintEl = null;
 		this.committedSpan = null;
 		this.partialSpan = null;
+		this.lineContainerEl = null;
 
 		this.editorTextareaEl = container.createEl("textarea", {
 			cls: "transcribe-editor",
@@ -801,6 +1078,11 @@ export class SidebarView extends ItemView {
 		this.editorTextareaEl = null;
 		this.recentListEl = null;
 		this.inlineControlsHandle = null;
+		// TASK 25 — 신규 위젯 핸들 / 라인 컨테이너 ref 도 함께 비운다.
+		this.speakerCapacityHandle = null;
+		this.translationCostHandle = null;
+		this.throttleIndicatorHandle = null;
+		this.lineContainerEl = null;
 	}
 }
 

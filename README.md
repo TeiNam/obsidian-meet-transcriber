@@ -25,10 +25,17 @@ Obsidian 사이드바에서 마이크 오디오를 실시간으로 AWS Transcrib
 본 플러그인을 설치·사용하기 전에 다음 네 가지 사항을 반드시 이해하고 동의해야 합니다.
 
 1. **외부 네트워크 사용**
-   본 플러그인은 동작에 다음 AWS 서비스의 외부 엔드포인트를 호출합니다.
-   - AWS Transcribe Streaming (`transcribestreaming.<region>.amazonaws.com`) — 마이크에서 캡처한 PCM 오디오 청크를 실시간 전송하여 전사 결과를 수신합니다.
-   - AWS Bedrock Runtime (`bedrock-runtime.<region>.amazonaws.com`) — 전사된 텍스트를 사용자가 선택한 파운데이션 모델에 전달하여 분석 결과를 수신합니다.
-   - AWS Bedrock (`bedrock.<region>.amazonaws.com`) — 설정 화면에서 사용 가능한 모델 목록을 조회합니다.
+   본 플러그인은 동작에 다음 외부 엔드포인트를 호출합니다. 트리거 조건이 충족될 때만 호출되며, 트리거 조건이 발생하지 않으면 해당 엔드포인트로의 통신은 일어나지 않습니다.
+
+   | 엔드포인트 | 트리거 조건 | 전송 데이터 |
+   |---|---|---|
+   | `transcribestreaming.<region>.amazonaws.com` | 클라우드 모드(`cloud-only`, `auto` 의 클라우드 단계) 세션 | 마이크 PCM 오디오 (16 kHz mono) |
+   | `bedrock-runtime.<region>.amazonaws.com` | 분석 버튼 클릭 (사용자 명시 동의) | 전사 노트 본문 텍스트 |
+   | `bedrock.<region>.amazonaws.com` | 설정 화면의 모델 목록 새로고침 | (요청 본문 없음) |
+   | `huggingface.co` | 로컬 모델 다운로드 모달에서 사용자가 명시 동의 시 — 1회 다운로드 후 재호출 없음 | (HTTPS GET, 요청 본문 없음) |
+   | `translate.<region>.amazonaws.com` | `Translation_Enabled = true` 이고 Final_Result 도착 시 | Final_Result 의 원본 텍스트만 (마이크 PCM 은 절대 전송하지 않음) |
+
+   **로컬 모드의 "no-network for audio" 약속** — `Backend_Selection_Mode` 가 `local-only` 이거나 `auto` 가 로컬로 폴백한 세션에서는 마이크에서 캡처한 PCM 오디오가 어떠한 외부 엔드포인트로도 전송되지 않습니다. 모델 가중치는 사용자 동의 후 Hugging Face 에서 1회 다운로드되며, 이후 세션에서는 디스크에 저장된 로컬 파일만 사용합니다. `Translation_Enabled = true` 인 경우에만 AWS Translate 로 **Final_Result 텍스트만** 송신되며, 원본 PCM 은 포함되지 않습니다.
 
 2. **AWS 계정 및 자격 증명 필요**
    본 플러그인은 독자적인 AI 서버를 제공하지 않습니다. 사용자가 **본인의 AWS 계정**을 만들고, IAM access key ID 와 secret access key 를 직접 발급·입력해야 합니다. Transcribe 및 Bedrock 서비스 활성화(리전별 모델 액세스 승인 포함)도 사용자 책임입니다.
@@ -86,49 +93,45 @@ AWS 콘솔 또는 CLI 로 프로그래밍 방식 액세스(access key) 전용 IA
 
 ```json
 {
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "TranscribeStreaming",
-      "Effect": "Allow",
-      "Action": [
-        "transcribe:StartStreamTranscription",
-        "transcribe:StartStreamTranscriptionWebSocket"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "BedrockInvokeModel",
-      "Effect": "Allow",
-      "Action": [
-        "bedrock:InvokeModel"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "BedrockModelDiscovery",
-      "Effect": "Allow",
-      "Action": [
-        "bedrock:ListFoundationModels",
-        "bedrock:ListInferenceProfiles"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "TranscribeVocabulary",
-      "Effect": "Allow",
-      "Action": [
-        "transcribe:CreateVocabulary",
-        "transcribe:UpdateVocabulary",
-        "transcribe:GetVocabulary",
-        "transcribe:DeleteVocabulary"
-      ],
-      "Resource": "*"
-    }
-  ]
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "TranscribeStreaming",
+            "Effect": "Allow",
+            "Action": [
+                "transcribe:StartStreamTranscription",
+                "transcribe:StartStreamTranscriptionWebSocket",
+                "transcribe:CreateVocabulary",
+                "transcribe:UpdateVocabulary",
+                "transcribe:GetVocabulary",
+                "transcribe:DeleteVocabulary"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "BedrockAnalysis",
+            "Effect": "Allow",
+            "Action": [
+                "bedrock:InvokeModel",
+                "bedrock:ListFoundationModels",
+                "bedrock:GetFoundationModel"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "TranslateRealtime",
+            "Effect": "Allow",
+            "Action": [
+                "translate:TranslateText"
+            ],
+            "Resource": "*"
+        }
+    ]
 }
 ```
 
+> **`TranslateRealtime` statement 는 옵션입니다.** 설정에서 `Translation_Enabled = true` 로 실시간 번역을 활성화하는 경우에만 필요합니다. 실시간 번역을 사용하지 않는다면 해당 statement 를 제외해도 클라우드 전사/분석 기능은 정상 동작합니다.
+>
 > 실무에서는 `Resource` 를 특정 Bedrock 모델 ARN 으로 제한하여 권한 범위를 더 좁히는 것을 권장합니다.
 
 #### 2. Bedrock 모델 액세스 승인
@@ -168,6 +171,42 @@ Transcribe Streaming 과 Bedrock 이 **동일 리전에서 모두 지원**되는
 7. **Edit** 버튼으로 오탈자를 교정하거나, **Analyze** 버튼으로 Bedrock 분석 결과(요약, 키워드, 결정사항, 액션 아이템, 참고사항 섹션의 회의록 형식)를 노트 끝에 추가합니다.
 8. 하단 **최근 전사** 리스트에서 이전 노트를 클릭하면 즉시 로드되어 편집·복사·분석이 가능합니다.
 
+### 로컬 모드(Local Whisper)
+
+> 로컬 모드는 마이크 PCM 오디오가 장치를 떠나지 않는 오프라인 전사 모드입니다. 설정의 `Backend_Selection_Mode` 가 `local-only` 이거나 `auto` 가 로컬로 폴백한 세션에서 활성화됩니다.
+
+#### 지원 모델 카탈로그
+
+| 모델 ID | 표시명 | 예상 크기 (MB) | 라이선스 | Hugging Face |
+|---|---|---|---|---|
+| `whisper-large-v3-turbo` | Whisper Large V3 Turbo | 1,700 | MIT | [onnx-community/whisper-large-v3-turbo](https://huggingface.co/onnx-community/whisper-large-v3-turbo) |
+| `distil-whisper-large-v3` | Distil-Whisper Large V3 | 800 | MIT | [distil-whisper/distil-large-v3](https://huggingface.co/distil-whisper/distil-large-v3) |
+
+각 모델은 사용자가 모델 다운로드 모달에서 명시 동의한 경우에만 Hugging Face 에서 1회 다운로드되며, 이후 세션에서는 디스크의 로컬 파일만 사용합니다.
+
+#### 성능 안내
+
+로컬 모드의 처리 속도는 사용자의 CPU/GPU 환경과 선택한 모드에 따라 다음과 같이 달라집니다.
+
+- **x86 CPU (Intel/AMD 데스크톱·노트북)**: 일반적으로 **실시간보다 느립니다**. 30초 분량 오디오 1청크를 전사하는 데 약 60–90초가 걸려, 누적 처리 시간이 오디오 길이의 2–3배에 도달할 수 있습니다. 회의가 끝난 뒤 일괄 모드로 처리하는 사용 흐름이 더 적합합니다.
+- **Apple Silicon (M1/M2/M3/M4 계열 Mac)**: ANE/Metal 가속 덕분에 **거의 실시간** 으로 동작합니다. 회의 중 사이드바에서 결과를 따라가며 볼 수 있는 수준입니다.
+- **청크 단위(chunked-streaming) 모드**: 30초 단위로 잘라 추론하며, 청크가 완료될 때마다 사이드바에 부분 결과가 누적되어 회의 중에도 진행 상황을 확인할 수 있습니다. 한 청크의 결과가 200ms 를 넘겨 지연되면 진행 인디케이터가 노출됩니다.
+- **일괄(progress-only) 모드**: 회의 종료 후 전체 오디오를 한 번에 추론합니다. 회의 중에는 진행률만 표시되고, 추론이 끝난 시점에 전체 전사 결과가 한꺼번에 노트에 기록됩니다.
+
+#### 화자 분리(Speaker Diarization)
+
+화자 분리(`Speaker_Diarization_Enabled = true`) 는 **클라우드 모드에서만** 동작하며, AWS Transcribe 의 `ShowSpeakerLabel` 옵션을 통해 제공됩니다. 로컬 모드 v1 에서는 화자 분리를 지원하지 않으므로, 로컬 세션에서는 해당 토글이 비활성화되어 있습니다.
+
+### 비용 안내
+
+이 플러그인은 다음 AWS 서비스의 사용량 기반 과금 정책을 따릅니다. 모든 비용은 사용자의 AWS 계정에 청구됩니다.
+
+- **AWS Transcribe Streaming** — 클라우드 전사 사용 시 오디오 분 단위 과금.
+- **AWS Bedrock** — 분석 버튼 클릭 시 모델별 입력/출력 토큰 단위 과금.
+- **AWS Translate** — `Translation_Enabled = true` 인 경우 **번역 입력 문자 수 단위로 과금**됩니다 (현재 표준 요금 기준 1백만 문자당 과금).
+
+번역 비용을 사용자가 직접 가늠할 수 있도록 사이드바에는 `Translation_Cost_Counter` 가 노출됩니다. 이 카운터는 **현재 세션 동안 AWS Translate 에 입력으로 전달된 원본 텍스트의 누적 문자 수(코드포인트 단위)** 를 표시하며, 1초 이내 간격으로 갱신됩니다. 카운터는 청구 금액 자체가 아니라 사용량 추정용 지표이며, 실제 요금은 AWS 콘솔의 Cost Explorer / Bills 에서 확인하세요. 플러그인은 카운터에 하드 상한을 적용하지 않습니다.
+
 ### 보안 권장 사항
 
 - vault 를 Git 이나 클라우드 서비스로 동기화하는 경우, `.obsidian/plugins/obsidian-transcribe-plugin/data.json` 을 별도로 제외할 수 없다면 **전용 저권한 IAM 키** 사용 + **정기 키 로테이션** 을 반드시 병행하세요.
@@ -205,10 +244,17 @@ Transcribe is an Obsidian community plugin that streams microphone audio to AWS 
 Before installing or using this plugin, you must understand and agree to the following four points.
 
 1. **External network usage**
-   This plugin calls the following AWS service endpoints to operate:
-   - AWS Transcribe Streaming (`transcribestreaming.<region>.amazonaws.com`) — sends captured PCM audio chunks in real time and receives transcripts.
-   - AWS Bedrock Runtime (`bedrock-runtime.<region>.amazonaws.com`) — sends the transcript text to a user-selected foundation model and receives the analysis.
-   - AWS Bedrock (`bedrock.<region>.amazonaws.com`) — lists available models in the settings screen.
+   This plugin calls the following external endpoints to operate. Each endpoint is contacted only when its trigger condition is met; if the trigger never occurs, no traffic is sent to that endpoint.
+
+   | Endpoint | Trigger | Data sent |
+   |---|---|---|
+   | `transcribestreaming.<region>.amazonaws.com` | Cloud-mode session (`cloud-only`, or `auto` while still on the cloud step) | Microphone PCM audio (16 kHz mono) |
+   | `bedrock-runtime.<region>.amazonaws.com` | Analyze button (explicit user action) | Transcript note body text |
+   | `bedrock.<region>.amazonaws.com` | Refreshing the model list in the settings screen | (no request body) |
+   | `huggingface.co` | One-time download after explicit user consent in the local-model download modal — never re-contacted afterwards | (HTTPS GET, no request body) |
+   | `translate.<region>.amazonaws.com` | `Translation_Enabled = true` and a Final_Result arrives | Final_Result source text only — microphone PCM is never sent |
+
+   **Local-mode "no-network for audio" promise** — When `Backend_Selection_Mode` is `local-only`, or when `auto` falls back to local for a session, microphone PCM captured by the plugin is **not transmitted to any external endpoint**. Model weights are downloaded once from Hugging Face after explicit user consent; subsequent sessions use only the locally stored files. AWS Translate is contacted only when `Translation_Enabled = true`, and the request body contains **only the Final_Result text** — never the raw PCM.
 
 2. **Your own AWS account and credentials are required**
    This plugin does **not** provide any hosted AI service. You must create your own AWS account, issue your own IAM access key ID and secret access key, and enable the Transcribe and Bedrock services (including per-region model access approval) yourself.
@@ -266,49 +312,45 @@ Create a programmatic-access IAM user and attach the following minimal policy:
 
 ```json
 {
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "TranscribeStreaming",
-      "Effect": "Allow",
-      "Action": [
-        "transcribe:StartStreamTranscription",
-        "transcribe:StartStreamTranscriptionWebSocket"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "BedrockInvokeModel",
-      "Effect": "Allow",
-      "Action": [
-        "bedrock:InvokeModel"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "BedrockModelDiscovery",
-      "Effect": "Allow",
-      "Action": [
-        "bedrock:ListFoundationModels",
-        "bedrock:ListInferenceProfiles"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "TranscribeVocabulary",
-      "Effect": "Allow",
-      "Action": [
-        "transcribe:CreateVocabulary",
-        "transcribe:UpdateVocabulary",
-        "transcribe:GetVocabulary",
-        "transcribe:DeleteVocabulary"
-      ],
-      "Resource": "*"
-    }
-  ]
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "TranscribeStreaming",
+            "Effect": "Allow",
+            "Action": [
+                "transcribe:StartStreamTranscription",
+                "transcribe:StartStreamTranscriptionWebSocket",
+                "transcribe:CreateVocabulary",
+                "transcribe:UpdateVocabulary",
+                "transcribe:GetVocabulary",
+                "transcribe:DeleteVocabulary"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "BedrockAnalysis",
+            "Effect": "Allow",
+            "Action": [
+                "bedrock:InvokeModel",
+                "bedrock:ListFoundationModels",
+                "bedrock:GetFoundationModel"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "TranslateRealtime",
+            "Effect": "Allow",
+            "Action": [
+                "translate:TranslateText"
+            ],
+            "Resource": "*"
+        }
+    ]
 }
 ```
 
+> **The `TranslateRealtime` statement is OPTIONAL.** It is required only if you enable real-time translation by setting `Translation_Enabled = true`. If you do not use real-time translation, you can omit this statement entirely and cloud transcription/analysis will continue to work normally.
+>
 > For production, scope `Resource` down to specific Bedrock model ARNs.
 
 #### 2. Approve Bedrock model access
@@ -347,6 +389,42 @@ Configure the following under `Settings → Community plugins → Transcribe →
 6. Drag-select text on the transcript board, or click the 📋 icon in the top-right corner to copy all.
 7. Use **Edit** to correct errors, or **Analyze** to append Bedrock-generated meeting minutes (Summary, Keywords, Decisions, Action items, and Notes sections).
 8. Click any item in the **Recent transcripts** list at the bottom to instantly load a previous note for editing, copying, or analysis.
+
+### Local mode (Local Whisper)
+
+> Local mode is an offline transcription mode where microphone PCM never leaves the device. It is active when `Backend_Selection_Mode` is `local-only`, or when `auto` falls back to local for a given session.
+
+#### Supported model catalog
+
+| Model ID | Display name | Approx. size (MB) | License | Hugging Face |
+|---|---|---|---|---|
+| `whisper-large-v3-turbo` | Whisper Large V3 Turbo | 1,700 | MIT | [onnx-community/whisper-large-v3-turbo](https://huggingface.co/onnx-community/whisper-large-v3-turbo) |
+| `distil-whisper-large-v3` | Distil-Whisper Large V3 | 800 | MIT | [distil-whisper/distil-large-v3](https://huggingface.co/distil-whisper/distil-large-v3) |
+
+Each model is downloaded from Hugging Face exactly once, only after explicit user consent in the download modal. Subsequent sessions read the locally stored file and never re-contact the network for weights.
+
+#### Performance expectations
+
+Throughput depends on the host CPU/GPU and the chosen streaming mode.
+
+- **x86 CPUs (Intel/AMD desktops and laptops)**: typically **slower than real time**. A 30-second audio chunk often takes 60–90 seconds to transcribe, so total processing time can reach 2–3× the audio duration. Batch-style use after the meeting is a better fit for these machines.
+- **Apple Silicon (M1/M2/M3/M4 Macs)**: **near real time**, thanks to ANE/Metal acceleration. You can typically follow along in the sidebar while the meeting is still happening.
+- **Chunked-streaming mode**: audio is sliced into 30-second chunks; each chunk's transcript is appended to the sidebar as it completes, so partial results are visible during the recording. If a chunk's result is delayed beyond 200 ms, a progress indicator is shown.
+- **Progress-only (batch) mode**: the full audio is transcribed in one pass after the recording stops. Only a progress percentage is shown during the recording, and the full transcript is appended to the note when inference completes.
+
+#### Speaker diarization
+
+Speaker diarization (`Speaker_Diarization_Enabled = true`) is **cloud-mode only**, delivered through AWS Transcribe's `ShowSpeakerLabel` option. **Local mode v1 does not support diarization**, so the toggle is disabled in the sidebar while a local-mode session is active.
+
+### Cost guidance
+
+This plugin uses the standard usage-based pricing of the underlying AWS services. All charges are billed to your AWS account.
+
+- **AWS Transcribe Streaming** — billed per audio minute when cloud transcription is used.
+- **AWS Bedrock** — billed per input/output token, model-dependent, when the Analyze button is used.
+- **AWS Translate** — when `Translation_Enabled = true`, billed **per character of input submitted to AWS Translate** (currently per million characters under the standard rate).
+
+To help you estimate translation cost during a session, the sidebar exposes a `Translation_Cost_Counter`. The counter shows the **cumulative number of source-text code points submitted to AWS Translate during the current session**, refreshed at least once per second. It is a usage proxy, not a billing total — verify the actual bill in the AWS console (Cost Explorer / Bills). The plugin does not impose a hard cap on this counter.
 
 ### Security recommendations
 

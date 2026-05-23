@@ -57,11 +57,19 @@ import {
 	StartStreamTranscriptionCommand,
 	TranscribeStreamingClient,
 	type AudioStream,
+	type Item,
+	type Result,
 	type TranscriptResultStream,
 } from "@aws-sdk/client-transcribe-streaming";
 
 import type { AudioCapture } from "./AudioCapture";
 import { TranscriptBuffer } from "../domain/TranscriptBuffer";
+import type { Transcript_Segment } from "../domain/segments";
+import {
+	createInitialSpeakerLabelSessionState,
+	mapSpeakerLabel,
+	type Speaker_Label_Session_State,
+} from "../domain/mapSpeakerLabel";
 import type { AwsCredentials, LanguageCode } from "../types/settings";
 
 // -----------------------------------------------------------------------------
@@ -118,6 +126,21 @@ export interface TranscribeCallbacks {
 	onPartial(text: string): void;
 	/** Final_Result 수신 시 호출. Requirements 3.6, 3.7. */
 	onFinal(text: string): void;
+	/**
+	 * Final_Result 의 구조화된 segment 단위 콜백 (v1.1 신규, design §4.6).
+	 *
+	 * `onFinal(text)` 가 1 회 발사되는 동일한 Final_Result 에 대해, 화자 구간별로
+	 * 1 개 이상의 `Transcript_Segment` 가 추가로 발사된다. 한 Final 응답에 두 명 이상의
+	 * 화자가 등장하면 화자별로 segment 가 분할되어 각 segment 마다 별개의 `segmentId` 가
+	 * 부여된다 (Requirement 6.5). `Item.Speaker` 가 없는 응답에서는 단일 segment 만
+	 * 발사되며 `speakerLabel` 은 `undefined` 가 된다 (Requirement 6.7).
+	 *
+	 * 본 콜백은 호환성을 위해 선택적(optional) 이다. 호출자가 등록하지 않으면 v1.0
+	 * 동작과 동일하게 `onFinal(text)` 만 발사된다.
+	 *
+	 * 매핑: Requirement 6.4, 6.5, 6.7, 13.4, 13.5.
+	 */
+	onFinalSegment?(segment: Transcript_Segment): void;
 	/** 첫 이벤트가 도착해 세션이 수립된 직후 1회 호출. Requirements 3.3. */
 	onSessionEstablished(): void;
 	/**
@@ -163,6 +186,17 @@ export interface StartParams {
 	 * 수립에서 `BadRequestException` 이 발생하여 `onSessionError("start_failed")` 로 통지된다.
 	 */
 	vocabularyName?: string;
+	/**
+	 * AWS Transcribe Streaming 의 화자 분리(`ShowSpeakerLabel`) 활성화 여부 (v1.1 신규).
+	 *
+	 * `true` 인 경우 `StartStreamTranscriptionCommand` 입력에
+	 * `ShowSpeakerLabel: true` 와 `EnablePartialResultsStabilization: true` 를 함께 전달한다
+	 * (Requirement 6.3). `false` 또는 미지정 시에는 두 필드를 SDK 인자에 포함하지 않으므로
+	 * v1.0 호출자(설정값 없이 `start({...})` 만 호출하는 경로) 와 완전 호환된다.
+	 *
+	 * 본 옵션의 기본값은 `false` 이다 (design §4.6).
+	 */
+	showSpeakerLabel?: boolean;
 	/** 이벤트 콜백 묶음. */
 	callbacks: TranscribeCallbacks;
 }
@@ -215,6 +249,24 @@ interface ActiveSession {
 	callbacks: TranscribeCallbacks;
 	/** 이 세션을 시작할 때 사용한 파라미터 스냅샷(재연결 시 재사용). */
 	params: StartParams;
+	/**
+	 * 다음 Final 결과에 부여할 1-based segment ID (Requirement 13.4, 13.5, design §4.6).
+	 *
+	 * 세션 시작 시 1 로 초기화되며, Final 1 건마다 사용 후 +1 한다. 한 Final 응답에서
+	 * 화자별로 분할되어 N 개 segment 가 발사되면 카운터도 그만큼 N 씩 증가한다.
+	 * **재연결 후에도 본 카운터를 유지한다** — 한 세션 내 단조 증가를 보장하기 위해
+	 * 재연결 진입 시 리셋하지 않는다.
+	 */
+	nextSegmentId: number;
+	/**
+	 * 화자 라벨 매핑 누적 상태 (Requirement 6.4, design §4.6, §4.10).
+	 *
+	 * 세션 시작 시 `createInitialSpeakerLabelSessionState()` 로 초기화되며,
+	 * Final 의 각 화자 구간을 처리할 때마다 `mapSpeakerLabel(rawLabel, state)` 의 결과로
+	 * 갱신된다. 재연결 후에도 동일 세션이므로 본 상태를 유지하여 동일 `spk_N` 이 같은
+	 * 표시명(`Speaker N`) 으로 매핑되도록 한다.
+	 */
+	speakerSession: Speaker_Label_Session_State;
 }
 
 /**
@@ -325,6 +377,10 @@ export class TranscribeService {
 			audioClosed: false,
 			callbacks: params.callbacks,
 			params,
+			// v1.1: segment 카운터와 화자 라벨 세션 상태를 세션 시작 시 1 회 초기화.
+			// 재연결은 이 인스턴스를 그대로 재사용하므로 동일 세션 내 단조 증가가 보장된다.
+			nextSegmentId: 1,
+			speakerSession: createInitialSpeakerLabelSessionState(),
 		};
 		this.activeSession = session;
 
@@ -578,6 +634,11 @@ export class TranscribeService {
 					? params.vocabularyName.trim()
 					: undefined;
 
+			// v1.1: 화자 분리 옵션 (Requirement 6.3, design §4.6).
+			// `showSpeakerLabel === true` 인 경우에만 두 필드를 SDK 인자에 포함하여
+			// v1.0 호출자(미지정/false) 와 완전 호환을 유지한다.
+			const showSpeakerLabel = params.showSpeakerLabel === true;
+
 			// StartStreamTranscriptionCommand 구성. AudioStream 은 AsyncIterable 로 전달.
 			const command = new StartStreamTranscriptionCommand({
 				LanguageCode: languageCode,
@@ -585,6 +646,12 @@ export class TranscribeService {
 				MediaSampleRateHertz: TRANSCRIBE_SAMPLE_RATE_HERTZ,
 				AudioStream: this.buildAudioStream(session),
 				...(vocabularyName ? { VocabularyName: vocabularyName } : {}),
+				...(showSpeakerLabel
+					? {
+							ShowSpeakerLabel: true,
+							EnablePartialResultsStabilization: true,
+						}
+					: {}),
 			});
 
 			// 세션 시작 — send() 는 세션 종료 시까지 유지되는 긴 프로미스.
@@ -611,7 +678,7 @@ export class TranscribeService {
 				if (session.stopRequested) {
 					break;
 				}
-				this.handleTranscriptResultStreamEvent(event, callbacks);
+				this.handleTranscriptResultStreamEvent(event, session);
 			}
 
 			// 스트림 자연 종료.
@@ -695,10 +762,19 @@ export class TranscribeService {
 	 * 이벤트는 union 타입이며, 우리가 관심 있는 member 는 `TranscriptEvent` 뿐이다.
 	 * 나머지 `BadRequestException` / `ConflictException` 등은 SDK 가 `send()` 의
 	 * 최상위 예외로 전환해 주는 경우가 대부분이므로 여기서는 무시한다.
+	 *
+	 * v1.1 (design §4.6):
+	 * - Final 처리 시 `Item.Speaker` 가 존재하면 화자 구간별로 segment 를 분할 발사한다
+	 *   (Requirement 6.5). `Item.Speaker` 가 없거나 `Items` 가 빈 응답에서는 단일 segment 만
+	 *   발사하며 `speakerLabel` 은 `undefined` 이다 (Requirement 6.7).
+	 * - 각 segment 마다 새 `segmentId` 를 부여하고 `mapSpeakerLabel` 로 표시명을 정규화한다
+	 *   (Requirement 6.4, 13.4, 13.5).
+	 * - `TranscriptBuffer` 누적은 `emitFinalSegments` 가 `appendSegment` 를 통해 1 회만 수행하여
+	 *   v1.0 호환 chunks 와 v1.1 segments 가 일관된 상태를 유지한다 (design §4.7).
 	 */
 	private handleTranscriptResultStreamEvent(
 		event: TranscriptResultStream,
-		callbacks: TranscribeCallbacks,
+		session: ActiveSession,
 	): void {
 		const transcriptEvent = event.TranscriptEvent;
 		if (!transcriptEvent) {
@@ -712,6 +788,8 @@ export class TranscribeService {
 			return;
 		}
 
+		const { callbacks } = session;
+
 		// 각 Result 를 순서대로 처리. Transcribe 는 한 번에 여러 Result 를 보낼 수 있다.
 		for (const result of results) {
 			const alternative = result.Alternatives?.[0];
@@ -724,11 +802,111 @@ export class TranscribeService {
 				// Partial — 이전 partial 을 치환하고 콜백 발사.
 				this.buffer.setPartial(text);
 				this.safeCallback(() => callbacks.onPartial(text));
-			} else {
-				// Final — 버퍼에 누적하고 콜백 발사.
-				this.buffer.appendFinal(text);
-				this.safeCallback(() => callbacks.onFinal(text));
+				continue;
 			}
+
+			// Final — 우선 v1.0 호환 콜백 (`onFinal(text)`) 을 1 회 발사한다.
+			// 호출자가 `onFinalSegment` 만 사용하더라도 `onFinal` 은 항상 발사되므로
+			// v1.0 사이드바 등 기존 소비자는 변경 없이 동작한다.
+			//
+			// `TranscriptBuffer.appendFinal(text)` 는 여기서 호출하지 않는다 — 본문 누적은
+			// 아래 `emitFinalSegments` 가 `appendSegment` 를 통해 1 회만 수행한다.
+			this.safeCallback(() => callbacks.onFinal(text));
+
+			// 그리고 화자 구간별로 segment 를 분할하여 발사 (Requirement 6.5, 6.7).
+			this.emitFinalSegments(result, text, session);
+		}
+	}
+
+	/**
+	 * 한 Final `Result` 를 화자 구간별로 분할하여 `Transcript_Segment` 를 발사한다
+	 * (design §4.6, Requirement 6.4, 6.5, 6.7).
+	 *
+	 * 알고리즘:
+	 * 1. `result.Alternatives[0].Items[]` 를 순회하며 동일 `Speaker` 가 연속된 구간끼리
+	 *    그룹화한다. `Item.Speaker` 가 `undefined` 인 Item 들은 별도 그룹과 동일하게
+	 *    "no-speaker" 그룹으로 묶인다.
+	 * 2. `Items` 가 비어 있거나 누락된 경우 (예: 화자 분리 비활성 응답, mock 테스트) 는
+	 *    단일 segment 1 건을 발사한다 (Requirement 6.7). `result.StartTime` / `EndTime` 으로
+	 *    시간을 채우며, 누락 시 0 으로 fallback. 본문은 `result.Alternatives[0].Transcript`
+	 *    (호출자가 전달한 `fallbackText`) 를 그대로 사용한다.
+	 * 3. 각 그룹의 `Item.Content` 를 join 하여 segment 본문을 구성하고, startTime/endTime 을
+	 *    그룹 첫/마지막 Item 에서 추출한다.
+	 * 4. 그룹별로 새 `segmentId` 를 부여하고, `Speaker` 가 있으면 `mapSpeakerLabel` 로 표시명을
+	 *    얻어 `speakerLabel` 에 부여한다.
+	 *
+	 * 본 메서드는 `TranscriptBuffer.appendSegment` 를 통해 v1.1 `segments` 와 v1.0 호환
+	 * `chunks` 양쪽을 동시에 1 회씩 갱신한다 (design §4.7).
+	 */
+	private emitFinalSegments(
+		result: Result,
+		fallbackText: string,
+		session: ActiveSession,
+	): void {
+		const { callbacks } = session;
+		const items = result.Alternatives?.[0]?.Items ?? [];
+
+		// 동일 화자가 연속된 구간으로 그룹화. `Items` 가 비어 있으면 그룹은 0 개.
+		const groups = groupItemsBySpeaker(items);
+
+		// `Items` 가 누락 / 비어 있으면 fallback 으로 단일 segment 발사.
+		if (groups.length === 0) {
+			const segment: Transcript_Segment = {
+				segmentId: session.nextSegmentId,
+				startSeconds: result.StartTime ?? 0,
+				endSeconds: result.EndTime ?? result.StartTime ?? 0,
+				text: fallbackText,
+				speakerLabel: undefined,
+			};
+			session.nextSegmentId += 1;
+			this.buffer.appendSegment(segment);
+			this.safeCallback(() => callbacks.onFinalSegment?.(segment));
+			return;
+		}
+
+		for (const group of groups) {
+			// 화자 라벨 정규화 (Requirement 6.4). raw label 이 없는 그룹은 undefined 로 둔다.
+			let speakerLabel: string | undefined;
+			if (group.rawSpeaker !== undefined) {
+				const mapped = mapSpeakerLabel(
+					group.rawSpeaker,
+					session.speakerSession,
+				);
+				speakerLabel = mapped.displayLabel;
+				session.speakerSession = mapped.sessionState;
+			}
+
+			// 본문 join — Item.Content 가 누락된 경우 빈 문자열로 fallback.
+			// PUNCTUATION 과 PRONUNCIATION 사이는 단순 공백 join 으로도 사이드바 표시에
+			// 충분하다 (구두점 앞 공백은 Sentence_Formatter 가 후속 처리에서 정리한다).
+			const text = group.items
+				.map((it) => it.Content ?? "")
+				.filter((s) => s.length > 0)
+				.join(" ")
+				.trim();
+
+			// 빈 본문 그룹은 발사 대상에서 제외 (예: punctuation-only 그룹).
+			if (text.length === 0) {
+				continue;
+			}
+
+			const startSeconds = group.items[0]?.StartTime ?? result.StartTime ?? 0;
+			const endSeconds =
+				group.items[group.items.length - 1]?.EndTime ??
+				result.EndTime ??
+				startSeconds;
+
+			const segment: Transcript_Segment = {
+				segmentId: session.nextSegmentId,
+				startSeconds,
+				endSeconds,
+				text,
+				speakerLabel,
+			};
+			session.nextSegmentId += 1;
+
+			this.buffer.appendSegment(segment);
+			this.safeCallback(() => callbacks.onFinalSegment?.(segment));
 		}
 	}
 
@@ -814,4 +992,66 @@ export class TranscribeService {
 			console.error("[TranscribeService] callback threw:", err);
 		}
 	}
+}
+
+// -----------------------------------------------------------------------------
+// 내부 헬퍼 — 화자 구간 그룹화 (design §4.6)
+// -----------------------------------------------------------------------------
+
+/**
+ * 동일 화자(`Item.Speaker`) 가 연속된 Item 들을 묶는 그룹.
+ *
+ * `rawSpeaker` 가 `undefined` 인 그룹은 "화자 정보 없음" 을 의미하며, 이 그룹은
+ * `mapSpeakerLabel` 호출 없이 `speakerLabel = undefined` 로 segment 가 발사된다
+ * (Requirement 6.7).
+ */
+interface SpeakerGroup {
+	readonly rawSpeaker: string | undefined;
+	readonly items: ReadonlyArray<Item>;
+}
+
+/**
+ * `Items[]` 를 동일 `Speaker` 가 연속된 구간끼리 그룹화한다 (Requirement 6.5).
+ *
+ * 구분 기준: `Item.Speaker` 가 직전 Item 의 값과 다르면 새 그룹을 시작한다.
+ * `undefined` 와 `"spk_0"` 도 서로 다른 값으로 취급되어 그룹이 분리된다.
+ *
+ * 입력이 빈 배열이면 빈 결과를 반환한다 — 호출자가 fallback 단일 segment 분기로
+ * 전환하도록 한다.
+ *
+ * 본 함수는 외부 효과 없는 순수 함수이며, 입력 배열을 변형하지 않는다.
+ *
+ * @param items AWS Transcribe Streaming Final 응답의 `Alternatives[0].Items[]`.
+ * @returns 동일 화자 구간끼리 묶인 그룹 배열. 입력 순서를 보존한다.
+ */
+function groupItemsBySpeaker(
+	items: ReadonlyArray<Item>,
+): ReadonlyArray<SpeakerGroup> {
+	if (items.length === 0) {
+		return [];
+	}
+
+	const groups: SpeakerGroup[] = [];
+	let currentSpeaker: string | undefined = items[0].Speaker;
+	let currentItems: Item[] = [];
+
+	for (const item of items) {
+		const speaker = item.Speaker;
+		if (speaker !== currentSpeaker) {
+			// 화자가 바뀌었으면 직전 그룹을 확정하고 새 그룹을 연다.
+			if (currentItems.length > 0) {
+				groups.push({ rawSpeaker: currentSpeaker, items: currentItems });
+			}
+			currentSpeaker = speaker;
+			currentItems = [];
+		}
+		currentItems.push(item);
+	}
+
+	// 마지막 그룹 flush.
+	if (currentItems.length > 0) {
+		groups.push({ rawSpeaker: currentSpeaker, items: currentItems });
+	}
+
+	return groups;
 }

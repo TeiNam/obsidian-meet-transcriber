@@ -27,9 +27,13 @@ import fc from "fast-check";
 
 import { SettingsStore, type ValidationResult } from "./SettingsStore";
 import type {
+	Backend_Selection_Mode,
+	Curated_Target_Language,
 	LanguageCode,
+	Streaming_Display_Mode,
 	SupportedLocale,
 	TranscribeSettings,
+	Translation_Output_Format,
 } from "../types/settings";
 
 // ---------------------------------------------------------------------------
@@ -65,6 +69,27 @@ function createStore(): SettingsStore {
  * - `region`은 `trim()` 후 비어있지 않아야 하므로 최소 길이 1의 문자열에서 공백만 있는 값을 걸러낸다.
  * - `transcriptFolder`는 `validate`가 검증하지 않으므로 임의 문자열을 그대로 사용한다.
  */
+const ALLOWED_BACKEND_MODES: readonly Backend_Selection_Mode[] = [
+	"cloud-only",
+	"local-only",
+	"auto",
+];
+const ALLOWED_STREAMING_DISPLAY_MODES: readonly Streaming_Display_Mode[] = [
+	"progress-only",
+	"chunked-streaming",
+];
+const ALLOWED_TRANSLATION_OUTPUT_FORMATS: readonly Translation_Output_Format[] =
+	["inline", "none"];
+const ALLOWED_TARGET_LANGUAGES: readonly Curated_Target_Language[] = [
+	"en",
+	"ko",
+	"ja",
+	"zh",
+	"es",
+	"fr",
+	"de",
+];
+
 const validSettingsArb: fc.Arbitrary<TranscribeSettings> = fc.record({
 	uiLocale: fc.constantFrom<SupportedLocale>(...ALLOWED_UI_LOCALES),
 	accessKeyId: fc.string({ maxLength: MAX_ACCESS_KEY_ID_LENGTH }),
@@ -78,6 +103,24 @@ const validSettingsArb: fc.Arbitrary<TranscribeSettings> = fc.record({
 	transcribeVocabularyName: fc.string({ maxLength: 200 }),
 	vocabularyPhrases: fc.string(),
 	analysisGlossary: fc.string(),
+	// v1.1 신규 필드 — `validate`가 검증하지 않으므로 화이트리스트 내에서 임의 선택.
+	backendSelectionMode: fc.constantFrom<Backend_Selection_Mode>(
+		...ALLOWED_BACKEND_MODES,
+	),
+	localModelId: fc.string({ maxLength: 64 }),
+	modelFolder: fc.string(),
+	streamingDisplayMode: fc.constantFrom<Streaming_Display_Mode>(
+		...ALLOWED_STREAMING_DISPLAY_MODES,
+	),
+	timestampOutputEnabled: fc.boolean(),
+	speakerDiarizationEnabled: fc.boolean(),
+	translationEnabled: fc.boolean(),
+	translationTargetLanguage: fc.constantFrom<Curated_Target_Language>(
+		...ALLOWED_TARGET_LANGUAGES,
+	),
+	translationOutputFormat: fc.constantFrom<Translation_Output_Format>(
+		...ALLOWED_TRANSLATION_OUTPUT_FORMATS,
+	),
 });
 
 // ---------------------------------------------------------------------------

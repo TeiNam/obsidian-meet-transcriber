@@ -56,6 +56,29 @@ export const ko: Translations = {
         refreshModels: "모델 목록 새로고침",
         modelsLoading: "불러오는 중...",
         noModelsHint: "자격 증명을 입력하고 새로고침을 눌러 주세요.",
+        // 백엔드 선택 컨트롤 (task 33) — 사이드바에서 클라우드/로컬/자동 모드를 즉시 전환.
+        backend: "백엔드",
+        backendOptions: {
+            "cloud-only": "클라우드 전용",
+            "local-only": "로컬 전용",
+            "auto": "자동",
+        },
+        // 활성 전사 엔진 표시 라벨 (task 33). cloud 백엔드 시 "AWS Transcribe", local 백엔드 시
+        // "Hugging Face 모델 (<localModelId>)" 형태로 노출된다.
+        activeEngine: "엔진",
+        cloudEngineLabel: "AWS Transcribe",
+        localEngineLabel: (modelId: string): string =>
+            `Hugging Face 모델 (${modelId.length > 0 ? modelId : "—"})`,
+        // 화자 분리/번역 컨트롤 라벨 — task 24 에서 도입, task 28 에서 톤 정렬.
+        speaker: "화자 분리",
+        translation: "번역",
+        targetLanguage: "대상 언어",
+        // 화자 분리 활성 시 사이드바 상단에 항상 노출되는 안내 라벨 (Requirement 6.8).
+        speakerCapacityNotice: "최대 10명까지 동시 화자를 인식할 수 있습니다",
+        // 청크 결과가 200ms 초과 지연될 때 표시되는 인디케이터 텍스트 (Requirement 10.2).
+        throttleIndicator: "청크 처리 중...",
+        // 번역 활성 동안 status row 에 표시되는 누적 문자 수 prefix (Requirement 13.9).
+        costCounter: (n: number): string => `번역 문자 수: ${n}`,
     },
     settings: {
         // UI_Locale 드롭다운 (Requirement 2.2 — 설정 탭의 첫 항목)
@@ -91,16 +114,9 @@ export const ko: Translations = {
             name: "전사 저장 폴더",
             desc: "전사 노트를 저장할 볼트 폴더입니다. 비워두면 볼트 루트에 저장됩니다.",
         },
-        // 분석 설정 섹션
+        // 분석 설정 섹션 — Bedrock 모델 ID 컨트롤은 v1.1 정리에서 사이드바 인라인
+        // 컨트롤로 이전되었다 (i18n: `sidebar.model`).
         analysisHeading: "분석",
-        bedrockModelId: {
-            name: "Bedrock 모델 ID",
-            desc: "분석에 사용할 파운데이션 모델 또는 추론 프로필 ID입니다. 새로고침을 누르면 AWS에서 사용 가능한 모델을 불러옵니다.",
-            refresh: "모델 목록 새로고침",
-            loading: "모델 목록 불러오는 중...",
-            empty: "사용 가능한 모델이 없습니다. 자격 증명과 리전을 확인한 뒤 새로고침을 눌러 주세요.",
-            custom: "직접 입력(저장된 값 유지)",
-        },
         // Vocabulary 섹션 (A) — 전사 정확도를 높이는 AWS Transcribe 커스텀 어휘 이름
         vocabularyHeading: "단어장",
         transcribeVocabularyName: {
@@ -124,6 +140,65 @@ export const ko: Translations = {
         aboutHeading: "정보",
         aboutNotice:
             "AWS 자격 증명은 .obsidian/plugins/obsidian-transcribe-plugin/data.json에 평문으로 저장됩니다. 볼트를 공유하거나 동기화할 때 이 파일도 함께 전송될 수 있습니다.",
+
+        // ─── v1.1 신규 (task 24) ───
+        // 본 섹션 키들은 task 28 (i18n 정리) 단계에서 정식 톤/이름으로 정렬되었다.
+
+        // Local model 섹션 — 백엔드 선택 / 로컬 모델 / 모델 폴더 (Requirement 1.1~1.6, task 23)
+        localModelHeading: "로컬 모델",
+        backendSelectionMode: {
+            name: "백엔드 선택 모드",
+            desc: "전사 방식을 선택합니다. 클라우드는 AWS Transcribe 를, 로컬은 기기 내 Whisper 를 사용합니다. 자동은 클라우드를 먼저 시도하고 오프라인이거나 자격 증명이 누락되면 로컬로 폴백합니다.",
+            options: {
+                "cloud-only": "클라우드 전용",
+                "local-only": "로컬 전용",
+                "auto": "자동 (클라우드 우선, 실패 시 로컬)",
+            },
+        },
+        localModelId: {
+            name: "로컬 모델",
+            desc: "로컬 전사에 사용할 Whisper 모델입니다. 큰 모델일수록 정확도가 높지만 더 많은 메모리와 디스크 공간이 필요합니다.",
+            empty: "선택되지 않음",
+            // 다운로드 버튼 라벨 — 설정 탭의 "모델 다운로드" 버튼과 옵션 표시명에서 공통 사용.
+            download: "모델 다운로드",
+            // 카탈로그 항목 1개의 표시명에 예상 크기를 함께 노출하기 위한 포매터.
+            // 예: "Whisper Small (~466 MB)" — 옵션 라벨/desc 양쪽에서 일관되게 사용.
+            sizeFormat: (sizeMb: number): string => `~${sizeMb} MB`,
+        },
+        modelFolder: {
+            name: "모델 폴더",
+            desc: "다운로드한 로컬 모델이 저장될 절대 경로입니다. 비워 두면 운영체제별 기본 위치를 사용합니다.",
+            placeholder: "절대 경로 (예: /Users/you/Library/Application Support/obsidian-transcribe-plugin/models)",
+        },
+        streamingDisplayMode: {
+            name: "스트리밍 표시 방식",
+            desc: "로컬 전사 결과를 화면에 표시하는 방식입니다. '진행률만'은 스트리밍 종료 시점에 전체 본문을 한 번에 커밋하고, '청크 스트리밍'은 30 초마다 부분 결과를 노출합니다.",
+            options: {
+                "progress-only": "진행률만 표시 (종료 시 일괄 커밋)",
+                "chunked-streaming": "청크 스트리밍 (30초 단위)",
+            },
+        },
+
+        // Output 섹션 — 문장 타임스탬프 (Requirement 5.1).
+        // 화자 분리 토글은 v1.1 정리에서 사이드바 인라인 컨트롤로 이전됨 (i18n: `sidebar.speaker`).
+        outputHeading: "출력",
+        timestampOutput: {
+            name: "문장 타임스탬프",
+            desc: "전사 결과를 [mm:ss] 또는 [hh:mm:ss] 프리픽스가 붙은 문장 단위 라인으로 저장합니다.",
+        },
+        // Translation 섹션은 v1.1 정리에서 사이드바 인라인 컨트롤로 이전되었다.
+        // 다만 출력 형식(`outputFormat`) 라벨/옵션 텍스트는 사이드바 드롭다운이 그대로
+        // 사용하므로 본 키만 남겨 둔다 (i18n 키 트리는 영/한 동일하게 유지).
+        translation: {
+            outputFormat: {
+                name: "노트 저장 시 번역 포함",
+                desc: "저장되는 전사 노트에 번역 텍스트를 함께 포함할지 여부를 선택합니다.",
+                options: {
+                    inline: "각 라인 아래에 포함",
+                    none: "사이드바에만 표시(저장하지 않음)",
+                },
+            },
+        },
     },
     notices: {
         // 마이크 권한 거부 (Requirement 3.9)
@@ -172,6 +247,70 @@ export const ko: Translations = {
         settingsSaveFailed: "설정을 저장하지 못했습니다.",
         // 단일 세션 불변식 위반 방지 (Requirement 7.6)
         singleSessionActive: "이미 진행 중인 전사 세션이 있습니다.",
+
+        // ─── v1.1 신규 (task 28, design §Error Handling) ───
+        // 백엔드 / 모델 (Requirement 3.7 auto 폴백 사유, Requirement 4 로컬 모델 상태)
+        backendFallbackOffline:
+            "오프라인 상태이므로 로컬 모드로 자동 전환됩니다.",
+        backendFallbackNoCredentials:
+            "AWS 자격 증명이 누락되어 로컬 모드로 자동 전환됩니다.",
+        backendFallbackTimeout:
+            "AWS Transcribe 응답 시간이 초과되어 로컬 모드로 자동 전환됩니다.",
+        backendFallbackAuth:
+            "AWS 인증에 실패하여 로컬 모드로 자동 전환됩니다.",
+        // 네트워크 일반 오류로 인한 자동 폴백 — Auth/Timeout/Offline 어느 카테고리에도
+        // 정확히 들어맞지 않는 일반 네트워크 오류(DNS 실패, ECONNREFUSED 등) 시에 사용.
+        backendFallbackNetwork:
+            "네트워크 오류로 인해 로컬 모드로 자동 전환됩니다.",
+        localModelMissing: (modelId: string): string =>
+            `로컬 모델 "${modelId}" 이(가) 설치되어 있지 않습니다. 설정에서 다운로드해 주세요.`,
+        localModelCorrupted:
+            "로컬 모델 파일이 손상되었습니다. 다시 다운로드해 주세요.",
+        localSlowerThanRealtime:
+            "로컬 모드는 실시간보다 느리게 전사될 수 있습니다.",
+        localSpeakerDiarizationUnsupported:
+            "로컬 모드(v1) 에서는 화자 분리가 지원되지 않습니다.",
+        // 사이드바 안내 라벨 — 화자 분리 활성 시 노출 (Requirement 6.8). sidebar.speakerCapacityNotice 와
+        // 같은 문구이지만 Notice 토스트 경로에서도 사용할 수 있도록 별도 키로 둔다 (design §Error Handling).
+        speakerCapacityNotice:
+            "최대 10명까지 동시 화자를 인식할 수 있습니다.",
+        diskSpaceLowDuringDownload: (freeMb: number): string =>
+            `사용 가능한 디스크 공간이 100MB 미만입니다(${freeMb}MB). 다운로드를 취소했습니다.`,
+        diskSpaceLowDuringInference: (freeMb: number): string =>
+            `사용 가능한 디스크 공간이 100MB 미만입니다(${freeMb}MB). 추론은 계속되지만 공간을 확보해 주세요.`,
+
+        // 다운로드 모달 (Requirement 2.1~2.3, 2.5, 2.9)
+        downloadConfirmTitle: "로컬 모델 다운로드",
+        downloadConfirmDescription: (size: number, host: string): string =>
+            `${host} 에서 약 ${size}MB 를 다운로드합니다. 계속하시겠습니까?`,
+        downloadConfirmAgree: "동의 후 다운로드",
+        downloadConfirmCancel: "취소",
+        downloadCancelled: "다운로드가 취소되었습니다.",
+        downloadFailedNetwork: (status: number): string =>
+            `다운로드에 실패했습니다 (HTTP ${status}). 네트워크 연결을 확인해 주세요.`,
+        downloadFailedChecksum:
+            "모델 무결성 검증에 실패했습니다. 파일이 삭제되었습니다.",
+        downloadFailedDisk:
+            "다운로드 중 디스크 쓰기 오류가 발생했습니다. 파일이 삭제되었습니다.",
+
+        // 번역 (Requirement 13.6, 14.5)
+        translationFailedSingle: "(번역 실패)",
+        translationAutoDisabled:
+            "반복된 실패로 번역이 자동 비활성화되었습니다.",
+
+        // 모드 게이트 (Requirement 14.8)
+        // NOTE: 구 Requirement 13.8 의 `translationLocalNeedsNetwork` 는 v1.1 에서 제거되었고,
+        // 그 자리를 아래 `translationOfflineUnsupported` 가 대체한다.
+        translationOfflineUnsupported:
+            "오프라인 모드에서는 실시간 번역이 비활성화됩니다.",
+        analysisOfflineUnsupported:
+            "오프라인 모드에서는 AI 분석이 비활성화됩니다.",
+        // 사이드바 비활성 컨트롤 4종(번역 토글/대상 언어/화자 분리/분석 버튼) 공통 툴팁 (Requirement 14.2)
+        tooltipOnlineOnlyFeature: "클라우드 모드에서만 사용할 수 있습니다",
+        // 분석 버튼 단독 비활성 시 툴팁. 본 키는 `analysisOfflineUnsupported` 와 동일 문구를 재사용하지만,
+        // 호출 위치(분석 버튼 단독 vs 4종 일괄)를 구분 가능하도록 별도 키로 분리한다 (design §4.8, task 25).
+        tooltipAnalysisOfflineDisabled:
+            "오프라인 모드에서는 AI 분석이 비활성화됩니다.",
     },
     // 분석 결과를 Transcript_Note에 부착할 때 사용하는 섹션 헤더 (Requirement 6.8)
     analysisHeader: "## 분석 결과",

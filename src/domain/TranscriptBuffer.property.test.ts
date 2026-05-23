@@ -1,17 +1,21 @@
 /**
  * `TranscriptBuffer` 속성 테스트 (Property-Based Tests).
  *
- * 본 파일은 `design.md`의 다음 두 가지 정확성 속성(Correctness Property)을 검증한다.
+ * 본 파일은 `design.md`의 다음 정확성 속성(Correctness Property)을 검증한다.
  *
- * - Property 3: 누적 및 치환 규칙 (Validates Requirements 3.6, 3.7)
- * - Property 4: 공백 전용 검출 (Validates Requirements 4.9, 5.8)
+ * - Property 3 (v1.0): 누적 및 치환 규칙 (Validates Requirements 3.6, 3.7)
+ * - Property 4 (v1.0): 공백 전용 검출 (Validates Requirements 4.9, 5.8)
+ * - v1.1 추가 (Task 10, design §4.7): segment 시퀀스 불변식 3개
+ *   - `appendSegment` 호출 시 `segmentId` 단조 증가 보존 (Validates Requirement 13.5)
+ *   - `appendSegment(s)` 후 `getCommittedText()` 길이 단조 증가 (Validates Requirement 13.4)
+ *   - `clear()` 후 segments 와 committed text 모두 비어 있음 (Validates Requirement 8.5)
  *
  * `fast-check` 3.x API를 사용하며, 각 `fc.assert`는 `numRuns: 200`으로 충분한 샘플을 확보한다.
  */
 
 import { describe, test, expect } from "vitest";
 import fc from "fast-check";
-import { TranscriptBuffer } from "./TranscriptBuffer";
+import { TranscriptBuffer, type Transcript_Segment } from "./TranscriptBuffer";
 
 /**
  * `TranscriptBuffer.isEmpty()`가 공백으로 간주하는 문자의 집합.
@@ -60,6 +64,43 @@ const whitespaceOnlyArb: fc.Arbitrary<string> = fc
 const withNonWhitespaceArb: fc.Arbitrary<string> = fc
 	.string({ maxLength: 50 })
 	.filter((s) => !isOnlyWhitespace(s));
+
+/**
+ * 임의의 `Transcript_Segment` 시퀀스 생성기 (Task 10).
+ *
+ * `segmentId` 단조 증가 불변식(Requirement 13.5)을 보장하기 위해 양의 정수 증분을
+ * 누적하여 단조 증가 ID 를 생성한다. `endSeconds >= startSeconds` 만 만족하도록
+ * 구성한다 (text 길이 단조 증가 검증과 무관하므로 단순 형태로 충분).
+ */
+const segmentSequenceArb: fc.Arbitrary<Transcript_Segment[]> = fc
+	.array(
+		fc.record({
+			idIncrement: fc.integer({ min: 1, max: 5 }),
+			startSeconds: fc.integer({ min: 0, max: 7200 }),
+			durationSeconds: fc.integer({ min: 0, max: 60 }),
+			text: fc.string({ maxLength: 30 }),
+			speakerLabel: fc.option(
+				fc.constantFrom("Speaker 1", "Speaker 2", "Speaker 3"),
+				{ nil: undefined },
+			),
+		}),
+		{ maxLength: 15 },
+	)
+	.map((rawSegments) => {
+		// idIncrement 의 누적 합으로 단조 증가 segmentId 를 만들고, startSeconds 와
+		// duration 으로 endSeconds 를 정렬하여 의미상 안정적인 segment 객체를 생성한다.
+		let cumulativeId = 0;
+		return rawSegments.map((s) => {
+			cumulativeId += s.idIncrement;
+			return {
+				segmentId: cumulativeId,
+				startSeconds: s.startSeconds,
+				endSeconds: s.startSeconds + s.durationSeconds,
+				text: s.text,
+				speakerLabel: s.speakerLabel,
+			} satisfies Transcript_Segment;
+		});
+	});
 
 describe("TranscriptBuffer — Property 3: 누적 및 치환 규칙", () => {
 	test("appendFinal/setPartial 시퀀스 적용 후 누적·치환 불변식이 유지된다 (Validates Requirements 3.6, 3.7)", () => {
@@ -134,6 +175,87 @@ describe("TranscriptBuffer — Property 4: 공백 전용 검출", () => {
 				buf.appendFinal(s);
 				expect(buf.isEmpty()).toBe(false);
 			}),
+			{ numRuns: 200 },
+		);
+	});
+});
+
+describe("TranscriptBuffer — v1.1 segment 시퀀스 불변식 (Task 10, design §4.7)", () => {
+	test("appendSegment 시퀀스 적용 후 getSegments() 의 segmentId 는 단조 증가한다 (Validates Requirement 13.5)", () => {
+		fc.assert(
+			fc.property(segmentSequenceArb, (segments) => {
+				const buf = new TranscriptBuffer();
+				for (const s of segments) {
+					buf.appendSegment(s);
+				}
+
+				const stored = buf.getSegments();
+
+				// 입력 시퀀스 길이 보존 — push 만 하므로 1:1 대응.
+				expect(stored.length).toBe(segments.length);
+
+				// 단조 증가 검증: 0 번째는 비교 대상이 없으므로 건너뛰고, 그 외 모든 i 에서
+				// stored[i].segmentId > stored[i-1].segmentId 이어야 한다.
+				for (let i = 1; i < stored.length; i++) {
+					expect(stored[i].segmentId).toBeGreaterThan(
+						stored[i - 1].segmentId,
+					);
+				}
+			}),
+			{ numRuns: 200 },
+		);
+	});
+
+	test("appendSegment(s) 호출 후 getCommittedText() 길이가 s.text.length 이상 증가한다 (Validates Requirement 13.4)", () => {
+		fc.assert(
+			fc.property(segmentSequenceArb, (segments) => {
+				const buf = new TranscriptBuffer();
+
+				for (const s of segments) {
+					const before = buf.getCommittedText().length;
+					buf.appendSegment(s);
+					const after = buf.getCommittedText().length;
+
+					// 길이 단조성: chunks.join(" ") 는 구분자 1 글자를 더할 수 있으므로
+					// 정확히 s.text.length 이상 증가해야 한다.
+					expect(after - before).toBeGreaterThanOrEqual(s.text.length);
+
+					// length() 는 getCommittedText().length 와 항상 동일.
+					expect(buf.length()).toBe(after);
+				}
+			}),
+			{ numRuns: 200 },
+		);
+	});
+
+	test("clear() 호출 후 getSegments() 와 getCommittedText() 가 모두 비어 있다 (Validates Requirement 8.5)", () => {
+		fc.assert(
+			fc.property(
+				segmentSequenceArb,
+				fc.array(fc.string(), { maxLength: 5 }),
+				(segments, partials) => {
+					const buf = new TranscriptBuffer();
+
+					// 임의 segment + partial 혼합 적용으로 모든 내부 필드를 채운다.
+					for (const s of segments) {
+						buf.appendSegment(s);
+					}
+					for (const p of partials) {
+						buf.setPartial(p);
+					}
+
+					buf.clear();
+
+					expect(buf.getSegments().length).toBe(0);
+					expect(buf.getCommittedText()).toBe("");
+					expect(buf.length()).toBe(0);
+					expect(buf.isEmpty()).toBe(true);
+					expect(buf.getSnapshot()).toEqual({
+						committed: "",
+						partial: "",
+					});
+				},
+			),
 			{ numRuns: 200 },
 		);
 	});

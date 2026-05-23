@@ -1,12 +1,21 @@
 /**
  * `TranscribeSettingTab` — Obsidian 설정 화면에 노출되는 플러그인 설정 탭.
  *
- * Obsidian `PluginSettingTab`을 확장하여 다음 5개 섹션을 정해진 순서로 렌더링한다.
+ * Obsidian `PluginSettingTab`을 확장하여 다음 섹션을 정해진 순서로 렌더링한다.
  *   1. UI Locale 드롭다운 (설정 탭의 **첫 항목**, Requirement 2.2)
  *   2. AWS credentials 섹션: access key ID / secret access key(password) / AWS region
  *   3. Transcription 섹션: transcription language / transcript folder(FolderSuggest 연결)
- *   4. Analysis 섹션: Bedrock model ID
- *   5. About 섹션: 자격 증명 저장 위치 보안 고지 (Requirement 2.13)
+ *   4. Local model 섹션 (task 23)
+ *   5. Analysis 섹션: 분석 용어 사전 (glossary) — Bedrock 모델 ID 는 v1.1 정리에서
+ *      사이드바 인라인 컨트롤로 이전됨
+ *   6. Vocabulary 섹션: AWS Custom Vocabulary 자동 동기화
+ *   7. Output 섹션: 문장 타임스탬프 토글 — 화자 분리 토글은 v1.1 정리에서 사이드바 이전됨
+ *   8. About 섹션: 자격 증명 저장 위치 보안 고지 (Requirement 2.13)
+ *
+ * v1.1 정리 (2026-05) — 다음 5개 컨트롤이 본 탭에서 제거되어 사이드바 인라인
+ * 컨트롤로 이전되었다: bedrockModelId, speakerDiarization, translationEnabled,
+ * translationTargetLanguage, translationOutputFormat. 저장 키와 `mergeWithDefaults`
+ * 화이트리스트는 그대로 유지된다 (회귀 게이트 보호).
  *
  * 설계 원칙(Requirements 2.1, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 2.10, 2.13, 2.16):
  * - 섹션 헤더는 `setHeading()` 패턴만 사용한다. `createEl("h2")`는 심사 거부 사유이므로 금지한다.
@@ -36,14 +45,16 @@ import type {
 	SupportedLocale,
 	TranscribeSettings,
 } from "../types/settings";
+import type { Local_Model_Installation_Record } from "../types/localModel";
 
-import {
-	BedrockModelCatalog,
-	type BedrockCatalogEntry,
-} from "../services/BedrockModelCatalog";
+import type { Model_Download_Manager } from "../services/Model_Download_Manager";
 import { VocabularyManager } from "../services/VocabularyManager";
 import { TranscribeError } from "../types/errors";
 import { FolderSuggest } from "./FolderSuggest";
+import {
+	renderLocalModelSection,
+	type LocalModelSectionHost,
+} from "./LocalModelSettingsSection";
 import type { SettingsStore } from "./SettingsStore";
 
 /**
@@ -64,6 +75,46 @@ export interface TranscribePluginLike extends Plugin {
 	settingsStore: SettingsStore;
 	t: Translations;
 	changeLocale(locale: SupportedLocale): Promise<void>;
+	/**
+	 * v1.1 신규 — 화자 분리 / 번역 토글의 양방향 미러 동기화용 setter.
+	 *
+	 * 설정 탭과 사이드바 인라인 컨트롤이 모두 본 메서드를 통해 값을 변경한다.
+	 * plugin 구현은 saveData + 열린 설정 탭 재렌더 + 열린 사이드바 재렌더를
+	 * 단일 경로로 처리하여 두 위치의 값을 항상 일치시킨다 (Requirement 6.2, 13.2).
+	 */
+	setSpeakerDiarizationEnabled(enabled: boolean): Promise<void>;
+	setTranslationEnabled(enabled: boolean): Promise<void>;
+	setTranslationTargetLanguage(
+		lang: TranscribeSettings["translationTargetLanguage"],
+	): Promise<void>;
+	setTranslationOutputFormat(
+		format: TranscribeSettings["translationOutputFormat"],
+	): Promise<void>;
+	/**
+	 * 로컬 Whisper 모델 다운로드 매니저(선택).
+	 *
+	 * 본 task 23 시점에는 plugin 측 구현이 아직 없을 수 있으므로 optional 로 둔다.
+	 * 값이 `undefined` 이면 "Download model" 버튼은 항상 비활성 상태로 렌더링된다.
+	 *
+	 * 주입 패턴: lazy getter 로 구현해도 되고(`get modelDownloadManager()`), 단순 필드로
+	 * 두어도 된다 — 본 인터페이스는 구조적 타입이라 양쪽 모두 호환된다.
+	 */
+	modelDownloadManager?: Model_Download_Manager;
+	/**
+	 * 다운로드 완료 시 plugin 측 책임으로 `localModelInstalled` data.json 키를
+	 * 갱신하기 위한 콜백(선택). plugin 이 다운로드 완료를 영속화할 때 호출된다.
+	 *
+	 * 본 task 23 에서는 인터페이스만 결정하고, 실제 영속화 와이어링은 plugin 측 task 에서 수행한다.
+	 */
+	onLocalModelDownloaded?(record: Local_Model_Installation_Record): void;
+	/**
+	 * 모델 폴더 prefill 에 사용할 기본 경로 (task 33).
+	 *
+	 * Obsidian 데스크톱 환경에서는 vault 루트의 `Attached Files` 절대 경로를 우선
+	 * 반환하고, vault adapter 가 basePath 헬퍼를 제공하지 않거나 빈 문자열일 경우
+	 * OS 별 기본 경로(`computeDefaultModelFolder()`) 로 fallback 한다.
+	 */
+	getDefaultModelFolder?(): string;
 }
 
 /**
@@ -76,14 +127,6 @@ const MAX_ACCESS_KEY_ID_LENGTH = 128;
  * `secretAccessKey` 최대 길이(Requirement 2.6, 2.16).
  */
 const MAX_SECRET_ACCESS_KEY_LENGTH = 256;
-
-/**
- * `bedrockModelId` 최대 길이(Requirement 2.8).
- *
- * 현재는 드롭다운 선택 기반이므로 UI 레벨에서는 자동 보장되지만, 카탈로그가 예상치 못한
- * 초장문 id 를 반환하는 경우를 대비해 검증 경로의 상한값 참조 상수로 남겨둔다.
- */
-const MAX_BEDROCK_MODEL_ID_LENGTH = 256;
 
 /**
  * AWS 리전 드롭다운에 표시할 일반 리전 목록.
@@ -129,33 +172,15 @@ export class TranscribeSettingTab extends PluginSettingTab {
 	private readonly transcribePlugin: TranscribePluginLike;
 
 	/**
-	 * Bedrock 모델 카탈로그 서비스.
-	 *
-	 * 자격 증명/리전을 받아 `ListFoundationModels` + `ListInferenceProfiles` 를 호출해
-	 * 드롭다운에 채울 모델 목록을 제공한다. 인스턴스는 재사용 가능(상태 없음).
-	 */
-	private readonly modelCatalog: BedrockModelCatalog;
-
-	/**
 	 * Vocabulary 자동 관리 서비스.
 	 *
 	 * 설정에 입력된 단어 목록을 AWS Custom Vocabulary 로 생성/업데이트/삭제한다.
 	 */
 	private readonly vocabManager: VocabularyManager;
 
-	/**
-	 * 가장 최근에 성공한 모델 카탈로그 조회 결과.
-	 * 드롭다운 재렌더(예: 로케일 변경) 시 네트워크 재호출 없이 즉시 옵션으로 반영하기 위함이다.
-	 */
-	private cachedModels: BedrockCatalogEntry[] = [];
-
-	/** 현재 카탈로그 조회가 진행 중인지 여부. UI 중복 클릭 방지. */
-	private modelsLoading = false;
-
 	constructor(app: App, plugin: TranscribePluginLike) {
 		super(app, plugin);
 		this.transcribePlugin = plugin;
-		this.modelCatalog = new BedrockModelCatalog();
 		this.vocabManager = new VocabularyManager();
 	}
 
@@ -189,11 +214,17 @@ export class TranscribeSettingTab extends PluginSettingTab {
 		this.renderLanguageCodeDropdown(containerEl, t);
 		this.renderTranscriptFolderField(containerEl, t);
 
-		// (4) Analysis 섹션
+		// (3.5) Local model 섹션 (task 23 — Requirement 1.1~1.6, 2.1, 4.7)
+		new Setting(containerEl)
+			.setName(t.settings.localModelHeading)
+			.setHeading();
+		renderLocalModelSection(containerEl, this.buildLocalModelHost());
+
+		// (4) Analysis 섹션 — Bedrock 모델 ID 는 v1.1 정리에서 사이드바 전용으로
+		// 이전되었고, 본 섹션에는 분석 추가 지시(glossary) 항목만 남는다.
 		new Setting(containerEl)
 			.setName(t.settings.analysisHeading)
 			.setHeading();
-		this.renderBedrockModelIdField(containerEl, t);
 		this.renderAnalysisGlossaryField(containerEl, t);
 
 		// (5) Vocabulary 섹션 (A) — Transcribe 커스텀 어휘 이름
@@ -202,11 +233,46 @@ export class TranscribeSettingTab extends PluginSettingTab {
 			.setHeading();
 		this.renderTranscribeVocabularyNameField(containerEl, t);
 
-		// (6) About 섹션 — 자격 증명 저장 위치 보안 고지 (Requirement 2.13)
+		// (6) Output 섹션 — 문장 타임스탬프 (Requirement 5.1).
+		// 화자 분리 토글은 v1.1 정리에서 사이드바 전용으로 이전되었다.
+		new Setting(containerEl)
+			.setName(t.settings.outputHeading)
+			.setHeading();
+		this.renderTimestampOutputToggle(containerEl, t);
+
+		// (7) Translation 섹션 — v1.1 정리에서 토글/대상 언어/출력 형식 모두
+		// 사이드바 인라인 컨트롤로 이전되어 본 섹션은 더 이상 렌더하지 않는다.
+
+		// (8) About 섹션 — 자격 증명 저장 위치 보안 고지 (Requirement 2.13)
 		new Setting(containerEl)
 			.setName(t.settings.aboutHeading)
 			.setHeading();
 		new Setting(containerEl).setDesc(t.settings.aboutNotice);
+	}
+
+	/**
+	 * Local model 섹션 렌더러에 전달할 호스트 객체를 구성한다 (task 23).
+	 *
+	 * `LocalModelSectionHost` 의 `saveIfValid` 는 본 클래스의 동명 private 메서드를 그대로
+	 * 위임 호출한다. plugin 의 다운로드 매니저와 완료 콜백은 optional 이므로 plugin 측에서
+	 * 주입되어 있으면 그대로 전달, 없으면 undefined.
+	 */
+	private buildLocalModelHost(): LocalModelSectionHost {
+		const plugin = this.transcribePlugin;
+		return {
+			app: this.app,
+			settings: plugin.settings,
+			t: plugin.t,
+			modelDownloadManager: plugin.modelDownloadManager,
+			onLocalModelDownloaded: plugin.onLocalModelDownloaded?.bind(plugin),
+			saveIfValid: () => this.saveIfValid(),
+			// task 33 — plugin 이 vault 루트 기반 기본 경로(`<vault>/Attached Files`) 를
+			// 알면 LocalModelSettingsSection 가 OS 기본 경로 대신 그 값을 prefill 한다.
+			getDefaultModelFolder:
+				typeof plugin.getDefaultModelFolder === "function"
+					? () => plugin.getDefaultModelFolder!()
+					: undefined,
+		};
 	}
 
 	// ---------------------------------------------------------------------
@@ -393,200 +459,6 @@ export class TranscribeSettingTab extends PluginSettingTab {
 					await this.saveIfValid();
 				});
 			});
-	}
-
-	/**
-	 * Bedrock 모델 ID 선택 필드 — 드롭다운 + 새로고침 버튼(Requirement 2.8).
-	 *
-	 * 구성:
-	 * 1. **드롭다운(select)**: 현재 `cachedModels` 배열을 옵션으로 표시한다.
-	 *    - 저장된 값이 목록에 없으면 "직접 입력(저장 값 유지)" 항목을 맨 위에 추가해 덮어쓰지 않는다.
-	 *    - 새로 선택하면 즉시 `settings.bedrockModelId` 갱신 후 저장.
-	 * 2. **새로고침 버튼(`refresh-cw` 아이콘)**: 클릭 시 현재 자격 증명/리전으로 카탈로그 재조회.
-	 *    - 로딩 중에는 버튼이 비활성화되고 desc 영역에 "불러오는 중..." 메시지 표시.
-	 *    - 자격 증명/리전이 비어 있으면 즉시 Notice 로 안내하고 API 호출하지 않는다.
-	 *    - 에러는 code 별로 `awsAuthError` / `awsNetworkError` Notice 로 분기.
-	 *
-	 * 심사 준수:
-	 * - 아이콘은 Obsidian `setIcon(el, "refresh-cw")` 사용 — 자체 SVG/이미지 미포함.
-	 * - 로그는 `console.error` 만 사용.
-	 * - 자격 증명은 메모리 상 플러그인 설정에서만 읽고 로그에 남기지 않는다.
-	 */
-	private renderBedrockModelIdField(
-		containerEl: HTMLElement,
-		t: Translations,
-	): void {
-		const setting = new Setting(containerEl)
-			.setName(t.settings.bedrockModelId.name)
-			.setDesc(t.settings.bedrockModelId.desc);
-
-		// 동적 상태 메시지(로딩/빈 결과 안내)를 표시할 보조 라인.
-		const statusEl = setting.settingEl.createDiv({
-			cls: "transcribe-setting-status",
-		});
-		if (this.modelsLoading) {
-			statusEl.setText(t.settings.bedrockModelId.loading);
-		}
-		// 저장된 모델이 있으면 빈 상태 메시지를 표시하지 않는다 — 앱 시작 직후에도
-		// 마지막 사용 모델이 드롭다운에 보이므로 "모델이 없습니다"는 혼란을 줄 수 있다.
-
-		let selectEl: HTMLSelectElement | null = null;
-		let refreshBtnEl: HTMLElement | null = null;
-
-		// 드롭다운 — Setting.addDropdown 을 사용해 Obsidian 의 기본 스타일을 따른다.
-		setting.addDropdown((dd) => {
-			selectEl = dd.selectEl;
-			dd.selectEl.classList.add("transcribe-model-dropdown");
-			this.populateModelDropdown(dd.selectEl, t);
-			dd.selectEl.addEventListener("change", async () => {
-				const value = dd.selectEl.value;
-				if (value.length === 0) {
-					return;
-				}
-				this.transcribePlugin.settings.bedrockModelId = value;
-				await this.saveIfValid();
-			});
-		});
-
-		// 새로고침 버튼 — extraSettingButton 대신 extraButton 으로 아이콘 제공.
-		setting.addExtraButton((btn) => {
-			refreshBtnEl = btn.extraSettingsEl;
-			btn.setIcon("refresh-cw");
-			btn.setTooltip(t.settings.bedrockModelId.refresh);
-			btn.onClick(() => {
-				void this.refreshModels(t, selectEl, statusEl, refreshBtnEl);
-			});
-			if (this.modelsLoading) {
-				btn.setDisabled(true);
-			}
-		});
-	}
-
-	/**
-	 * 드롭다운 옵션 목록을 `cachedModels` 기준으로 구성한다.
-	 *
-	 * 저장된 값이 목록에 없으면 맨 위에 해당 값을 직접 옵션으로 추가해
-	 * 새로고침 없이도 마지막에 사용한 모델이 선택된 상태로 보이도록 한다.
-	 * 이 옵션을 선택해도 값은 변경되지 않는다(이미 저장된 값이므로).
-	 */
-	private populateModelDropdown(
-		selectEl: HTMLSelectElement,
-		t: Translations,
-	): void {
-		selectEl.empty();
-
-		const current = this.transcribePlugin.settings.bedrockModelId.trim();
-		const known = new Set(this.cachedModels.map((m) => m.id));
-
-		// 저장된 값이 카탈로그에 없으면 해당 값을 직접 옵션으로 추가한다.
-		// 새로고침 전에도 마지막 사용 모델이 드롭다운에 표시되어 즉시 사용 가능.
-		if (current.length > 0 && !known.has(current)) {
-			const opt = selectEl.createEl("option", {
-				value: current,
-				text: current,
-			});
-			opt.selected = true;
-		}
-
-		// 제공자별로 optgroup 으로 묶어 표시하면 사용자가 찾기 편하다.
-		const byProvider = new Map<string, BedrockCatalogEntry[]>();
-		for (const entry of this.cachedModels) {
-			const list = byProvider.get(entry.provider) ?? [];
-			list.push(entry);
-			byProvider.set(entry.provider, list);
-		}
-
-		for (const [provider, entries] of byProvider) {
-			const group = selectEl.createEl("optgroup", { attr: { label: provider } });
-			for (const entry of entries) {
-				const prefix = entry.kind === "inference-profile" ? "⚡ " : "";
-				const opt = group.createEl("option", {
-					value: entry.id,
-					text: `${prefix}${entry.label} (${entry.id})`,
-				});
-				if (entry.id === current) {
-					opt.selected = true;
-				}
-			}
-		}
-
-		// 저장된 값이 없고 목록도 비어 있으면 placeholder 역할의 빈 옵션 하나를 둔다.
-		if (selectEl.options.length === 0) {
-			selectEl.createEl("option", { value: "", text: "" });
-		}
-	}
-
-	/**
-	 * 새로고침 버튼 클릭 흐름.
-	 *
-	 * 1. 자격 증명/리전이 누락되면 Notice 로 안내하고 API 호출하지 않는다.
-	 * 2. 로딩 상태 on → 버튼 비활성화, 상태 텍스트 표시.
-	 * 3. `BedrockModelCatalog.listInvokableModels` 호출.
-	 * 4. 성공 시 `cachedModels` 갱신 후 드롭다운 재구성.
-	 * 5. 실패 시 에러 코드별 Notice.
-	 * 6. finally: 로딩 상태 off, 버튼 복원.
-	 */
-	private async refreshModels(
-		t: Translations,
-		selectEl: HTMLSelectElement | null,
-		statusEl: HTMLElement,
-		refreshBtnEl: HTMLElement | null,
-	): Promise<void> {
-		if (this.modelsLoading) return;
-
-		const plugin = this.transcribePlugin;
-		const missing: string[] = [];
-		if (plugin.settings.accessKeyId.trim().length === 0) missing.push(t.settings.accessKeyId.name);
-		if (plugin.settings.secretAccessKey.trim().length === 0) missing.push(t.settings.secretAccessKey.name);
-		if (plugin.settings.region.trim().length === 0) missing.push(t.settings.region.name);
-		if (missing.length > 0) {
-			new Notice(t.notices.missingSettings(missing));
-			return;
-		}
-
-		this.modelsLoading = true;
-		statusEl.setText(t.settings.bedrockModelId.loading);
-		if (refreshBtnEl) {
-			refreshBtnEl.setAttribute("aria-disabled", "true");
-			refreshBtnEl.addClass("is-disabled");
-		}
-
-		try {
-			const models = await this.modelCatalog.listInvokableModels({
-				credentials: {
-					accessKeyId: plugin.settings.accessKeyId,
-					secretAccessKey: plugin.settings.secretAccessKey,
-				},
-				region: plugin.settings.region,
-			});
-			this.cachedModels = models;
-			if (selectEl) {
-				this.populateModelDropdown(selectEl, t);
-			}
-			if (models.length === 0) {
-				statusEl.setText(t.settings.bedrockModelId.empty);
-			} else {
-				statusEl.setText("");
-			}
-		} catch (err) {
-			statusEl.setText("");
-			if (err instanceof TranscribeError) {
-				if (err.code === "AWS_AUTH") {
-					new Notice(t.notices.awsAuthError);
-				} else {
-					new Notice(t.notices.awsNetworkError);
-				}
-			} else {
-				console.error("[TranscribeSettingTab] refreshModels unknown error:", err);
-				new Notice(t.notices.awsNetworkError);
-			}
-		} finally {
-			this.modelsLoading = false;
-			if (refreshBtnEl) {
-				refreshBtnEl.removeAttribute("aria-disabled");
-				refreshBtnEl.removeClass("is-disabled");
-			}
-		}
 	}
 
 	/**
@@ -799,6 +671,33 @@ export class TranscribeSettingTab extends PluginSettingTab {
 		if (errors.length === 0) {
 			await this.trySave();
 		}
+	}
+
+	// ---------------------------------------------------------------------
+	// Output 섹션
+	// ---------------------------------------------------------------------
+
+	/**
+	 * 문장 타임스탬프 출력 토글 (Requirement 5.1).
+	 *
+	 * 단순 boolean 설정이며 사이드바 미러는 적용되지 않는다 (사이드바에 인라인 컨트롤이 없음).
+	 * 변경 시 `settingsStore.save` 직접 호출 — 다른 미러 동기화가 필요 없으므로 plugin setter
+	 * 메서드를 거치지 않는다.
+	 */
+	private renderTimestampOutputToggle(
+		containerEl: HTMLElement,
+		t: Translations,
+	): void {
+		new Setting(containerEl)
+			.setName(t.settings.timestampOutput.name)
+			.setDesc(t.settings.timestampOutput.desc)
+			.addToggle((tg) => {
+				tg.setValue(this.transcribePlugin.settings.timestampOutputEnabled);
+				tg.onChange(async (value) => {
+					this.transcribePlugin.settings.timestampOutputEnabled = value;
+					await this.saveIfValid();
+				});
+			});
 	}
 
 	/**

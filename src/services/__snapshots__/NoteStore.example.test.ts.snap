@@ -1,0 +1,13 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`NoteStore — 후방 호환 snapshot (Task 29, Requirement 8.2/8.3) > v1.0 default settings produce v1.0-compatible transcript 1`] = `
+"---
+startedAt: "2025-01-15T09:00:00+09:00"
+endedAt: "2025-01-15T09:05:00+09:00"
+language: "ko-KR"
+backend: "cloud"
+---
+
+안녕하세요. 회의를 시작합니다.
+"
+`;

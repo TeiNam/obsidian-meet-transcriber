@@ -101,6 +101,21 @@ function createFakePlugin(
 		setModelId: vi.fn().mockResolvedValue(undefined),
 		getAvailableModels: vi.fn(() => []),
 		refreshAvailableModels: vi.fn().mockResolvedValue([]),
+		// TASK 24 가 host 계약에 추가한 미러 컨트롤 stub. task 25 에서 회귀 방지
+		// 차원에서 임시 추가했으며, task 24 마무리 시점에 함께 정리한다.
+		getCurrentSpeakerDiarizationEnabled: vi.fn(() => false),
+		setSpeakerDiarizationEnabled: vi.fn().mockResolvedValue(undefined),
+		getCurrentTranslationEnabled: vi.fn(() => false),
+		setTranslationEnabled: vi.fn().mockResolvedValue(undefined),
+		getCurrentTranslationTargetLanguage: vi.fn(() => "en" as const),
+		setTranslationTargetLanguage: vi.fn().mockResolvedValue(undefined),
+		// v1.1 정리 — outputFormat 도 사이드바로 이전됨 (task 28 사후정리).
+		getCurrentTranslationOutputFormat: vi.fn(() => "inline" as const),
+		setTranslationOutputFormat: vi.fn().mockResolvedValue(undefined),
+		getCurrentBackendSelectionMode: vi.fn(() => "cloud-only" as const),
+		// task 33 — 사이드바 백엔드 드롭다운 + activeEngine 라벨에 사용되는 신규 stub.
+		setBackendSelectionMode: vi.fn().mockResolvedValue(undefined),
+		getCurrentLocalModelId: vi.fn(() => ""),
 	};
 	// vi.fn 구체 타입과 `Mock<any[], unknown>` 사이의 공변성 차이를 우회한다.
 	// 런타임 동작은 동일하며, 테스트는 반환값의 `.mock.calls` 를 확인할 뿐이다.

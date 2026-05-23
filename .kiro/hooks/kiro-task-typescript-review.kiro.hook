@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Task TypeScript review",
+  "description": "스펙 태스크 완료 후 typescript-reviewer 서브에이전트가 자동으로 변경된 TS/JS 파일을 리뷰하여 타입 안정성, 비동기 정확성, 보안, 관용적 패턴을 검사합니다. .claude 하네스의 얕은 검증(console.log/format/typecheck) 위에 더 깊은 리뷰를 얹는 역할입니다.",
+  "version": "1",
+  "when": {
+    "type": "postTaskExecution"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "방금 spec 태스크가 완료되었습니다. 이번 태스크에서 변경된 TypeScript / JavaScript 파일들을 대상으로 typescript-reviewer 서브에이전트로 리뷰를 수행하세요.\n\n수행 절차:\n1. 먼저 git status / git diff 로 이번 태스크에서 실제로 변경된 파일을 식별합니다. 변경이 없거나 .ts/.js/.tsx/.jsx 파일이 없으면 \"리뷰 대상 없음\"으로 보고하고 종료합니다.\n2. invoke_sub_agent (name=\"typescript-reviewer\") 를 호출하여 다음 관점으로 리뷰를 위임합니다:\n   - 타입 안정성 (any 사용, 강타입 누락, 좁히기 부족)\n   - 비동기 정확성 (await 누락, race condition, 정리되지 않는 Promise)\n   - 보안 (사용자 입력 검증, 안전하지 않은 SDK 호출, 민감 정보 로깅 위험)\n   - Obsidian 플러그인 관용 (innerHTML/var/console.log/global app/activeLeaf 직접 접근 등 .kiro/steering 의 금지 패턴)\n   - 테스트 커버리지 부족 (특히 design.md §Correctness Properties 와 매핑된 PBT 누락 여부)\n3. 결과는 file:line 인용 + 우선순위(critical/major/minor) 로 요약하여 채팅에 출력합니다.\n4. critical 이슈가 발견되면 사용자에게 명시적으로 알려 다음 태스크 진행 전 수정을 권고합니다. minor 이슈는 정보로만 보고합니다.\n\n이미 .claude 하네스가 처리하는 항목(console.log 흔적, 포맷, tsc 컴파일 에러)은 중복 보고하지 않습니다."
+  }
+}

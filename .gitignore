@@ -33,3 +33,6 @@ Thumbs.db
 
 # Kiro 스펙 (로컬 작업용 — 원격 저장소에는 포함하지 않음)
 .kiro/specs/
+
+# Claude Code harness symlinks (local install)
+.claude/

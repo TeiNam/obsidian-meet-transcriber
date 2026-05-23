@@ -40,16 +40,22 @@ import { Notice, TFile, TFolder, Vault, normalizePath } from "obsidian";
 
 import type { SupportedLocale } from "../i18n";
 import { createI18n } from "../i18n";
-import type { LanguageCode } from "../types/settings";
+import type { Curated_Target_Language, LanguageCode } from "../types/settings";
 
 /**
  * Transcript_Note 파일에 직렬화되는 메타데이터.
  *
- * 세 필드 모두 프론트매터의 단일 라인으로 기록된다.
- * `startedAt`/`endedAt`은 ISO 8601 문자열(로컬 타임존 오프셋 포함)이며,
- * 호출 측에서 이미 포맷팅된 값을 넘긴다는 것을 전제로 한다.
+ * v1.0 의 세 필드(`startedAt`, `endedAt`, `language`) 는 모든 노트에 항상 기록되며,
+ * v1.1 의 신규 필드(`backend`, `speakerDiarization`, `speakerCount`,
+ * `translationTargetLanguage`) 는 모두 optional 이다. undefined 인 키는
+ * 프론트매터 출력에서 제외되어 v1.0 호환을 유지한다(Requirement 8.3).
  *
- * Requirements 4.6.
+ * 인터페이스는 TypeScript 관용에 따라 camelCase 를 사용하지만, YAML 직렬화 시에는
+ * design §Frontmatter Schema Changes 의 snake_case 키(`speaker_diarization`,
+ * `speaker_count`, `translation_target_language`) 로 변환된다. 기존 v1.0 키
+ * (`startedAt` 등) 의 camelCase 표기는 v1.0 호환을 위해 그대로 유지한다.
+ *
+ * Requirements: 4.6, 3.9, 6.9, 8.3, 13 전반.
  */
 export interface TranscriptNoteMeta {
 	/** 전사 시작 시각(ISO 8601, 예: `"2025-01-15T09:30:00+09:00"`). */
@@ -58,6 +64,41 @@ export interface TranscriptNoteMeta {
 	endedAt: string;
 	/** 사용된 전사 언어 코드. `LanguageCode` 유니온으로 제한된다. */
 	language: LanguageCode;
+
+	// ─── v1.1 신규 (optional, undefined 면 직렬화에서 제외) ───────────────
+
+	/**
+	 * 활성 세션이 사용한 Transcription_Backend.
+	 *
+	 * `auto` 모드에서 폴백이 발생한 경우 종료 시점에 활성화되어 있던 백엔드를
+	 * 기록한다(Requirement 3.10). 미지정 시 키를 생략해 v1.0 노트와 동일한
+	 * 프론트매터를 생성한다(Requirement 8.3).
+	 */
+	backend?: "cloud" | "local";
+
+	/**
+	 * 화자 분리 활성화 여부.
+	 *
+	 * `false` 또는 미지정 시 키를 생략하여 비활성 세션의 노트를 v1.0 형식과
+	 * 동일하게 유지한다(Requirement 6.9, 8.3).
+	 */
+	speakerDiarization?: boolean;
+
+	/**
+	 * 본 세션에서 등장한 고유 화자 수(정수).
+	 *
+	 * `speakerDiarization === true` 인 경우에만 기록한다(Requirement 6.9).
+	 * 호출 측에서 이미 화자 수를 집계해 넘기는 것을 전제로 한다.
+	 */
+	speakerCount?: number;
+
+	/**
+	 * 번역 대상 언어 코드.
+	 *
+	 * `translationEnabled === true` 인 세션에서만 기록한다. 비활성 세션은
+	 * 키를 생략하여 노트 본문이 v1.0 통짜 형식과 동일하게 유지되도록 한다.
+	 */
+	translationTargetLanguage?: Curated_Target_Language;
 }
 
 /**
@@ -403,21 +444,53 @@ function formatLocalTimestamp(date: Date): string {
 /**
  * 프론트매터 블록 문자열을 직렬화한다.
  *
- * Requirements 4.6에 명시된 3개 필드(`startedAt`, `endedAt`, `language`)를
- * Obsidian 관용 포맷으로 작성한다. 값에 YAML 특수 문자가 포함될 가능성을 고려해
- * 기본적으로 큰따옴표로 래핑하고 내부 큰따옴표/백슬래시를 이스케이프한다.
+ * v1.0 의 3 개 필수 키(`startedAt`, `endedAt`, `language`) 를 항상 출력하고,
+ * v1.1 의 4 개 optional 키(`backend`, `speaker_diarization`, `speaker_count`,
+ * `translation_target_language`) 는 `meta` 에 정의된 경우(즉, `undefined` 가 아닌
+ * 경우) 에만 출력에 포함한다. undefined 인 키는 출력에서 제외되어 v1.0 노트와
+ * 비트 단위 동치를 유지한다(Requirement 8.3).
+ *
+ * 키 순서는 design §Frontmatter Schema Changes 의 예시와 일치한다:
+ *   startedAt → endedAt → language → backend → speaker_diarization
+ *   → speaker_count → translation_target_language
+ *
+ * 값 직렬화 규칙:
+ * - 문자열 값(`startedAt`, `endedAt`, `language`, `backend`,
+ *   `translation_target_language`) 은 큰따옴표로 래핑하여 YAML 특수 문자에
+ *   안전하다.
+ * - boolean(`speaker_diarization`) 과 number(`speaker_count`) 는 따옴표 없이
+ *   YAML 플레인 스칼라로 출력한다.
  *
  * 반환값은 `---\n...\n---\n\n` 형태이며, 본문 문자열 앞에 바로 concat 할 수 있다.
  */
 function serializeFrontmatter(meta: TranscriptNoteMeta): string {
-	const lines = [
+	// 키 순서가 의미를 가지므로 명시적으로 라인 배열에 push 한다.
+	const lines: string[] = [
 		FRONTMATTER_FENCE,
 		`startedAt: ${quoteYamlString(meta.startedAt)}`,
 		`endedAt: ${quoteYamlString(meta.endedAt)}`,
 		`language: ${quoteYamlString(meta.language)}`,
-		FRONTMATTER_FENCE,
-		"",
 	];
+
+	// v1.1 optional 키: undefined 면 라인 자체를 출력하지 않는다.
+	if (meta.backend !== undefined) {
+		lines.push(`backend: ${quoteYamlString(meta.backend)}`);
+	}
+	if (meta.speakerDiarization !== undefined) {
+		lines.push(`speaker_diarization: ${meta.speakerDiarization ? "true" : "false"}`);
+	}
+	if (meta.speakerCount !== undefined) {
+		// 정수 형식으로 직렬화한다. 호출 측이 비정수를 넘기는 경우는 없으므로
+		// String() 만으로 충분하지만, 명확성을 위해 toString() 을 사용한다.
+		lines.push(`speaker_count: ${meta.speakerCount.toString()}`);
+	}
+	if (meta.translationTargetLanguage !== undefined) {
+		lines.push(
+			`translation_target_language: ${quoteYamlString(meta.translationTargetLanguage)}`,
+		);
+	}
+
+	lines.push(FRONTMATTER_FENCE, "");
 	return `${lines.join("\n")}\n`;
 }
 

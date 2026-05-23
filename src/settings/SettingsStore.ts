@@ -17,7 +17,8 @@
 
 import type { Plugin } from "obsidian";
 
-import { DEFAULT_SETTINGS, type TranscribeSettings } from "../types/settings";
+import { type TranscribeSettings } from "../types/settings";
+import { mergeWithDefaults } from "./mergeWithDefaults";
 
 /**
  * `validate()` 반환 타입.
@@ -78,8 +79,12 @@ export class SettingsStore {
 	/**
 	 * 저장된 설정을 불러와 기본값과 머지한다.
 	 *
-	 * 머지 순서: `DEFAULT_SETTINGS` → 저장된 값(후자가 우선).
-	 * 저장된 데이터가 `null`/`undefined`여도 안전하게 `DEFAULT_SETTINGS` 복사본을 반환한다.
+	 * `mergeWithDefaults`(design §Settings Auto-fill on Load) 가 v1.1 신규 필드를 즉시
+	 * 채우고 화이트리스트 외 값을 안전한 기본값으로 강제 복귀시킨다(Requirement 1.8, 13.1).
+	 * 지연 채움(lazy fill, getter 에서 default 처리) 은 명시적으로 금지된다.
+	 *
+	 * 저장된 데이터가 `null`/`undefined` 여도 안전하게 모든 필드가 기본값으로 채워진
+	 * `TranscribeSettings` 를 반환한다.
 	 *
 	 * 주의: 본 메서드는 값을 **검증하지 않는다**. 호출 측이 필요 시 `validate()`로 확인한다.
 	 *
@@ -87,7 +92,7 @@ export class SettingsStore {
 	 */
 	async load(): Promise<TranscribeSettings> {
 		const saved = (await this.plugin.loadData()) as Partial<TranscribeSettings> | null;
-		return Object.assign({}, DEFAULT_SETTINGS, saved ?? {});
+		return mergeWithDefaults(saved);
 	}
 
 	/**

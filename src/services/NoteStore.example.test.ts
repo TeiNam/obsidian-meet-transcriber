@@ -55,6 +55,8 @@ vi.mock("obsidian", async () => {
 // 모킹 이후의 obsidian 심볼을 import.
 import { Notice, TFile, TFolder, Vault } from "obsidian";
 
+import { TranscriptBuffer } from "../domain/TranscriptBuffer";
+import { mergeWithDefaults } from "../settings/mergeWithDefaults";
 import type { TranscriptNoteMeta } from "./NoteStore";
 import { NoteStore } from "./NoteStore";
 
@@ -489,5 +491,253 @@ describe("NoteStore.readTranscriptBody", () => {
 		vi.spyOn(vault, "read").mockRejectedValue(err);
 
 		await expect(store.readTranscriptBody(file)).rejects.toBe(err);
+	});
+});
+
+// -----------------------------------------------------------------------------
+// v1.1 신규 frontmatter 키 — Task 22 (Requirement 3.9, 6.9, 8.3, 13)
+// -----------------------------------------------------------------------------
+//
+// 검증 목표:
+// 1. 모두 없는 경우(예시 1, v1.0 동치): meta = { startedAt, endedAt, language }
+//    → frontmatter 가 v1.0 과 비트 단위 동치로 직렬화 (Requirement 8.3, 8.2).
+// 2. 모두 있는 경우(예시 2, cloud + diarization + translation):
+//    meta = { ..., backend: "cloud", speakerDiarization: true, speakerCount: 3,
+//             translationTargetLanguage: "en" }
+//    → 4 개 신규 키가 모두 출력에 포함, 키 순서 일관성 검증.
+// 3. 일부만 있는 경우(예시 3, 로컬 모드):
+//    meta = { ..., backend: "local" }
+//    → backend 만 추가되고 speakerDiarization/speakerCount/
+//      translationTargetLanguage 는 출력에서 누락.
+
+describe("NoteStore.saveTranscript — v1.1 신규 frontmatter 키 (Task 22)", () => {
+	let vault: Vault;
+	let store: NoteStore;
+
+	beforeEach(() => {
+		resetNoticeCalls();
+		vault = new Vault();
+		store = new NoteStore(vault);
+		vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+		// 빈 루트로 충돌 검사를 단순화한다.
+		const root = new TFolder();
+		root.path = "";
+		root.children = [];
+		vi.spyOn(vault, "getRoot").mockReturnValue(root);
+	});
+
+	it("시나리오 1 — 모두 없는 경우: v1.0 과 비트 단위 동치인 frontmatter 를 생성한다 (Requirement 8.3)", async () => {
+		const created = makeTFile(`${FIXED_BASENAME}.md`);
+		const createSpy = vi.spyOn(vault, "create").mockResolvedValue(created);
+
+		// 신규 필드를 일절 지정하지 않은 v1.0 동치 메타.
+		const meta: TranscriptNoteMeta = sampleMeta();
+
+		await store.saveTranscript("본문", meta, "", FIXED_NOW);
+
+		const [, content] = createSpy.mock.calls[0];
+		// design §Backward Compatibility / 예시 1 의 v1.0 동치 frontmatter.
+		// 신규 키 4 개(`backend`, `speaker_diarization`, `speaker_count`,
+		// `translation_target_language`) 는 어느 것도 출력에 등장해서는 안 된다.
+		expect(content).toBe(
+			[
+				"---",
+				'startedAt: "2025-01-15T09:30:00+09:00"',
+				'endedAt: "2025-01-15T09:45:00+09:00"',
+				'language: "ko-KR"',
+				"---",
+				"",
+				"본문",
+			].join("\n"),
+		);
+		// 회귀 게이트: 신규 키 4 종이 출력 어디에도 등장하지 않아야 한다.
+		const written = content as string;
+		expect(written).not.toContain("backend:");
+		expect(written).not.toContain("speaker_diarization:");
+		expect(written).not.toContain("speaker_count:");
+		expect(written).not.toContain("translation_target_language:");
+	});
+
+	it("시나리오 2 — 모두 있는 경우: 4 개 신규 키가 정해진 순서로 모두 직렬화된다 (Requirement 6.9, 13)", async () => {
+		const created = makeTFile(`${FIXED_BASENAME}.md`);
+		const createSpy = vi.spyOn(vault, "create").mockResolvedValue(created);
+
+		// design §Frontmatter Schema Changes 의 예시 2 (cloud + diarization + translation).
+		const meta: TranscriptNoteMeta = {
+			...sampleMeta(),
+			backend: "cloud",
+			speakerDiarization: true,
+			speakerCount: 3,
+			translationTargetLanguage: "en",
+		};
+
+		await store.saveTranscript("본문", meta, "", FIXED_NOW);
+
+		const [, content] = createSpy.mock.calls[0];
+		// 키 순서: startedAt → endedAt → language → backend
+		//          → speaker_diarization → speaker_count → translation_target_language
+		// 문자열 값은 큰따옴표, boolean / number 는 plain scalar.
+		expect(content).toBe(
+			[
+				"---",
+				'startedAt: "2025-01-15T09:30:00+09:00"',
+				'endedAt: "2025-01-15T09:45:00+09:00"',
+				'language: "ko-KR"',
+				'backend: "cloud"',
+				"speaker_diarization: true",
+				"speaker_count: 3",
+				'translation_target_language: "en"',
+				"---",
+				"",
+				"본문",
+			].join("\n"),
+		);
+	});
+
+	it("시나리오 3 — 일부만 있는 경우(로컬 모드): backend 만 추가되고 나머지 신규 키는 누락된다 (Requirement 8.3)", async () => {
+		const created = makeTFile(`${FIXED_BASENAME}.md`);
+		const createSpy = vi.spyOn(vault, "create").mockResolvedValue(created);
+
+		// design §Frontmatter Schema Changes 의 예시 3 (로컬 모드, 화자 분리 v1 미지원).
+		const meta: TranscriptNoteMeta = {
+			...sampleMeta(),
+			backend: "local",
+		};
+
+		await store.saveTranscript("본문", meta, "", FIXED_NOW);
+
+		const [, content] = createSpy.mock.calls[0];
+		// backend 라인만 추가되고 speaker_diarization / speaker_count /
+		// translation_target_language 는 출력에 등장해서는 안 된다.
+		expect(content).toBe(
+			[
+				"---",
+				'startedAt: "2025-01-15T09:30:00+09:00"',
+				'endedAt: "2025-01-15T09:45:00+09:00"',
+				'language: "ko-KR"',
+				'backend: "local"',
+				"---",
+				"",
+				"본문",
+			].join("\n"),
+		);
+		const written = content as string;
+		expect(written).not.toContain("speaker_diarization:");
+		expect(written).not.toContain("speaker_count:");
+		expect(written).not.toContain("translation_target_language:");
+	});
+
+	it("speakerDiarization=false 도 명시 지정 시에는 출력에 포함된다 (undefined vs false 구분)", async () => {
+		const created = makeTFile(`${FIXED_BASENAME}.md`);
+		const createSpy = vi.spyOn(vault, "create").mockResolvedValue(created);
+
+		// undefined 와 false 를 동등하게 취급하면 v1.0 호환이 손상되지는 않지만,
+		// 호출 측이 의도적으로 false 를 기록하려는 케이스(예: 화자 분리를 시도했으나 실패) 를
+		// 위해 false 도 직렬화한다. v1.0 호환은 호출 측에서 undefined 로 두는 것이 책임이다.
+		const meta: TranscriptNoteMeta = {
+			...sampleMeta(),
+			backend: "cloud",
+			speakerDiarization: false,
+		};
+
+		await store.saveTranscript("본문", meta, "", FIXED_NOW);
+
+		const [, content] = createSpy.mock.calls[0];
+		expect(content).toContain("speaker_diarization: false");
+		// false 인 경우 speaker_count 는 함께 기록되지 않는다(호출 측이 키를 생략함으로써).
+		expect((content as string)).not.toContain("speaker_count:");
+	});
+});
+
+// -----------------------------------------------------------------------------
+// 후방 호환 snapshot — Task 29 (Requirement 8.2, 8.3)
+// -----------------------------------------------------------------------------
+//
+// 회귀 게이트(REGRESSION GATE):
+//
+// 본 describe 블록은 design §Backward Compatibility 의 동등성 명제를 보호한다.
+// 기본 설정(`DEFAULT_SETTINGS` = `mergeWithDefaults({})`) + `meta.backend: "cloud"` 만
+// 추가된 시나리오에서 v1.1 가 v1.0 노트와 비트 단위로 동치인 본문을 생성하는지를
+// snapshot 으로 고정한다.
+//
+// 본 snapshot 이 깨지면 즉시 빌드를 차단해야 한다 (Requirement 8.2 위반).
+// 갱신이 필요한 경우 변경의 v1.0 호환성 영향을 design §Backward Compatibility 와
+// 함께 PR 본문에 명시 후, `vitest -u` 가 아닌 직접 검토 후 갱신한다.
+
+describe("NoteStore — 후방 호환 snapshot (Task 29, Requirement 8.2/8.3)", () => {
+	let vault: Vault;
+	let store: NoteStore;
+
+	beforeEach(() => {
+		resetNoticeCalls();
+		vault = new Vault();
+		store = new NoteStore(vault);
+		vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+		// 빈 루트로 충돌 검사를 단순화하여 파일명 결정 결과를 결정론적으로 만든다.
+		const root = new TFolder();
+		root.path = "";
+		root.children = [];
+		vi.spyOn(vault, "getRoot").mockReturnValue(root);
+	});
+
+	it("v1.0 default settings produce v1.0-compatible transcript", async () => {
+		// design §Backward Compatibility 검증 케이스의 정확한 재현.
+		//
+		// 입력 구성요소:
+		// 1. `mergeWithDefaults({})` 결과는 `DEFAULT_SETTINGS` 와 비트 단위 동치이며,
+		//    `timestampOutputEnabled === false` 이므로 v1.0 통짜 본문 분기로 진입한다.
+		// 2. `TranscriptBuffer.appendFinal` 을 두 번 호출해 한국어 두 문장을 누적.
+		//    `appendSegment` 가 아닌 `appendFinal` 을 쓰는 이유는 design 예시가
+		//    Final 텍스트만 누적된 v1.0 동치 시나리오이기 때문이다.
+		// 3. `meta` 는 v1.0 키 3 종 + v1.1 신규 키 중 `backend: "cloud"` 만 포함한다.
+		//    다른 v1.1 신규 키는 default 가 false/empty 이므로 호출 측이 undefined 로
+		//    두어 frontmatter 출력에서 제외된다 (Requirement 8.3).
+		const settings = mergeWithDefaults({});
+
+		const buffer = new TranscriptBuffer();
+		buffer.appendFinal("안녕하세요.");
+		buffer.appendFinal("회의를 시작합니다.");
+
+		const meta: TranscriptNoteMeta = {
+			startedAt: "2025-01-15T09:00:00+09:00",
+			endedAt: "2025-01-15T09:05:00+09:00",
+			language: "ko-KR",
+			backend: "cloud",
+		};
+
+		// 시간 의존성 제거: 결정론적 파일명을 위해 `FIXED_NOW` 를 주입한다.
+		const created = makeTFile(`${FIXED_BASENAME}.md`);
+		const createSpy = vi.spyOn(vault, "create").mockResolvedValue(created);
+
+		// 본문 직렬화는 v1.0 통짜 본문 분기로 진입한다.
+		// 통짜 본문 = `chunks.join(" ")` + 단일 trailing newline = "안녕하세요. 회의를 시작합니다.\n".
+		// (timestampOutputEnabled === false 분기, Sentence_Formatter.format)
+		const body = settings.timestampOutputEnabled
+			? // v1.1 의 timestamp 분기는 본 회귀 게이트의 대상이 아니므로 본 시나리오에서는
+				// 도달 불가. 본 라인은 type narrowing 용 fallthrough 일 뿐이다.
+				""
+			: buffer.getCommittedText().trim().length > 0
+				? `${buffer.getCommittedText()}\n`
+				: "";
+
+		await store.saveTranscript(body, meta, "", FIXED_NOW);
+
+		// `Vault.create` 에 전달된 최종 콘텐츠 = serializeFrontmatter(meta) + body.
+		// 본 콘텐츠가 design §Backward Compatibility 예시와 비트 단위 동치인지를
+		// snapshot 으로 고정한다 (회귀 게이트).
+		const [, content] = createSpy.mock.calls[0];
+		expect(content).toMatchSnapshot();
+
+		// 추가 방어선 — snapshot 갱신 시 실수로 회귀가 통과하지 않도록 핵심 불변식을
+		// 명시 검증한다. 이 두 줄이 깨지면 snapshot 또한 반드시 깨진다.
+		const written = content as string;
+		expect(written).toContain('backend: "cloud"');
+		expect(written).not.toContain("speaker_diarization:");
+		expect(written).not.toContain("speaker_count:");
+		expect(written).not.toContain("translation_target_language:");
+		// v1.0 통짜 본문은 단순 텍스트 결합 (`안녕하세요. 회의를 시작합니다.\n`).
+		expect(written.endsWith("안녕하세요. 회의를 시작합니다.\n")).toBe(true);
 	});
 });

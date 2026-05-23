@@ -1,6 +1,6 @@
 {
   "name": "obsidian-transcribe-plugin",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Transcribe microphone audio in real time via AWS Transcribe and analyze results with AWS Bedrock.",
   "main": "main.js",
   "scripts": {
@@ -37,6 +37,8 @@
     "@aws-sdk/client-bedrock": "^3.1045.0",
     "@aws-sdk/client-bedrock-runtime": "^3.1045.0",
     "@aws-sdk/client-transcribe": "^3.1045.0",
-    "@aws-sdk/client-transcribe-streaming": "^3.1045.0"
+    "@aws-sdk/client-transcribe-streaming": "^3.1045.0",
+    "@aws-sdk/client-translate": "^3.1045.0",
+    "@huggingface/transformers": "3.8.1"
   }
 }
