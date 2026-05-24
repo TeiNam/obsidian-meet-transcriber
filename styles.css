@@ -457,13 +457,35 @@
 }
 
 /* ─────────────────────────────────────────────
- * 11. 사이드바 인라인 컨트롤 — 언어/모델 빠른 선택
- *     상태 영역과 컨트롤 버튼 사이에 배치된다. 좁은 사이드바 폭에 맞춰 세로 스택 레이아웃.
+ * 11. 사이드바 인라인 컨트롤 — 입력 / 엔진 / 출력 그룹
+ *     상태 영역과 컨트롤 버튼 사이에 배치된다. 좁은 사이드바 폭에 맞춰 세로 스택.
+ *     각 그룹은 작은 헤더 + 카드 형태의 섹션으로 묶여 시각적 위계를 부여한다.
  * ───────────────────────────────────────────── */
 .transcribe-inline-controls {
     display: flex;
     flex-direction: column;
+    gap: var(--size-4-3);
+}
+
+/* 카테고리 그룹 — 카드형 컨테이너. */
+.transcribe-inline-group {
+    display: flex;
+    flex-direction: column;
     gap: var(--size-4-2);
+    padding: var(--size-4-2) var(--size-4-3);
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+}
+
+.transcribe-inline-group-title {
+    font-size: var(--font-ui-smaller, 0.75rem);
+    font-weight: var(--font-semibold, 600);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    padding-bottom: var(--size-2-1);
+    border-bottom: 1px solid var(--background-modifier-border);
 }
 
 .transcribe-inline-row {
@@ -471,11 +493,12 @@
     flex-direction: row;
     align-items: center;
     gap: var(--size-4-2);
+    min-height: 28px;
 }
 
 .transcribe-inline-label {
     flex: 0 0 auto;
-    min-width: 3.5em;
+    width: 5.5em;
     color: var(--text-muted);
     font-size: var(--font-ui-small);
 }
@@ -486,7 +509,29 @@
     font-size: var(--font-ui-small);
 }
 
-/* 모델 드롭다운 옆 새로고침 아이콘 — 설정 탭의 extraSettingsEl 과 비슷한 크기. */
+/* 활성 엔진 read-only 라벨 — 약간 강조된 모노스페이스 톤. */
+.transcribe-inline-row--engine {
+    align-items: baseline;
+}
+
+.transcribe-inline-engine {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    font-family: var(--font-monospace);
+    word-break: break-all;
+}
+
+/* 토글 — Obsidian 기본 체크박스 위에 색감만 살짝. */
+.transcribe-inline-toggle {
+    flex: 0 0 auto;
+    margin-left: auto;
+    cursor: pointer;
+    accent-color: var(--interactive-accent);
+}
+
+/* 새로고침 아이콘 버튼 — 모델/마이크 행 우측. */
 .transcribe-inline-refresh {
     flex: 0 0 auto;
     display: flex;
@@ -495,17 +540,22 @@
     width: 28px;
     height: 28px;
     padding: 4px;
-    background: var(--background-secondary);
+    background: var(--background-primary);
     color: var(--text-muted);
     border: 1px solid var(--background-modifier-border);
     border-radius: var(--radius-s);
     cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
 .transcribe-inline-refresh:hover:not(.is-loading) {
     background: var(--background-modifier-hover);
+    border-color: var(--background-modifier-border-hover);
     color: var(--text-normal);
+}
+
+.transcribe-inline-refresh:active:not(.is-loading) {
+    background: var(--background-modifier-active-hover);
 }
 
 .transcribe-inline-refresh.is-loading {
@@ -520,6 +570,11 @@
 
 .transcribe-inline-refresh.is-loading .svg-icon {
     animation: transcribe-spin 1s linear infinite;
+}
+
+/* 모드 게이트로 비활성화된 행 — 시각적으로 흐릿하게. */
+.transcribe-inline-row[data-disabled-reason="offline-mode"] {
+    opacity: 0.45;
 }
 
 @keyframes transcribe-spin {

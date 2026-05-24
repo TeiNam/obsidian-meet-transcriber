@@ -176,6 +176,12 @@ describe("SidebarInlineControls — 모드 게이트 (Requirement 14.2 / 14.3)",
 				plugin.settings.backendSelectionMode = mode;
 			},
 			getCurrentLocalModelId: () => plugin.settings.localModelId,
+			// 마이크 선택 — 본 테스트군은 디바이스 동작을 검증하지 않으므로 no-op 스텁.
+			getCurrentAudioInputDeviceId: () => plugin.settings.audioInputDeviceId,
+			setAudioInputDeviceId: async (deviceId: string) => {
+				plugin.settings.audioInputDeviceId = deviceId;
+			},
+			listAudioInputDevices: async (): Promise<MediaDeviceInfo[]> => [],
 		};
 	}
 

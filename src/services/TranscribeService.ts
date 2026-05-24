@@ -197,6 +197,14 @@ export interface StartParams {
 	 * 본 옵션의 기본값은 `false` 이다 (design §4.6).
 	 */
 	showSpeakerLabel?: boolean;
+	/**
+	 * 사용할 마이크(`MediaDeviceInfo.deviceId`).
+	 *
+	 * 빈 문자열 / 미지정 시 OS / 브라우저 기본 입력 장치를 사용한다.
+	 * 저장된 deviceId 가 더 이상 존재하지 않으면 `AudioCapture` 가 내부적으로
+	 * `{ audio: true }` 로 폴백하여 기본 장치로 세션을 이어간다.
+	 */
+	audioInputDeviceId?: string;
 	/** 이벤트 콜백 묶음. */
 	callbacks: TranscribeCallbacks;
 }
@@ -362,7 +370,9 @@ export class TranscribeService {
 		// 2) 마이크 권한 + MediaStream 획득.
 		let mediaStream: MediaStream;
 		try {
-			mediaStream = await this.audioCapture.requestPermission();
+			mediaStream = await this.audioCapture.requestPermission(
+				params.audioInputDeviceId,
+			);
 		} catch (err) {
 			console.error("[TranscribeService] Microphone permission failed:", err);
 			this.safeCallback(() => params.callbacks.onSessionError("start_failed"));

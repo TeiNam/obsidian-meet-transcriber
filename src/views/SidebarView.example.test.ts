@@ -116,6 +116,10 @@ function createFakePlugin(
 		// task 33 — 사이드바 백엔드 드롭다운 + activeEngine 라벨에 사용되는 신규 stub.
 		setBackendSelectionMode: vi.fn().mockResolvedValue(undefined),
 		getCurrentLocalModelId: vi.fn(() => ""),
+		// 마이크 선택 — 본 테스트군은 디바이스 동작을 검증하지 않으므로 no-op 스텁.
+		getCurrentAudioInputDeviceId: vi.fn(() => ""),
+		setAudioInputDeviceId: vi.fn().mockResolvedValue(undefined),
+		listAudioInputDevices: vi.fn().mockResolvedValue([]),
 	};
 	// vi.fn 구체 타입과 `Mock<any[], unknown>` 사이의 공변성 차이를 우회한다.
 	// 런타임 동작은 동일하며, 테스트는 반환값의 `.mock.calls` 를 확인할 뿐이다.

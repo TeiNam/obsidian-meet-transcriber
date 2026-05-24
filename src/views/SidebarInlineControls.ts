@@ -98,6 +98,20 @@ export interface SidebarInlineControlsHost {
 	 * 그대로 전달한다. 빈 문자열은 "미선택" 으로 간주한다.
 	 */
 	getCurrentLocalModelId(): string;
+
+	// ─── 마이크 선택 ───
+	/** 현재 설정에 저장된 입력 장치 deviceId. 빈 문자열은 시스템 기본 장치. */
+	getCurrentAudioInputDeviceId(): string;
+	/** 입력 장치 변경을 설정에 반영하고 저장한다. 빈 문자열로 "기본 장치" 선택. */
+	setAudioInputDeviceId(deviceId: string): Promise<void> | void;
+	/**
+	 * 현재 OS / 브라우저가 노출하는 입력 장치 목록을 enumerate 한다.
+	 *
+	 * 새로고침 버튼을 누르면 host 가 먼저 `requestPermission()` 으로 권한을 받고
+	 * 본 메서드를 호출한다. 권한이 없으면 빈 `label` 이 반환되며, 본 모듈이
+	 * `microphoneUnknown(idx)` 로 라벨을 합성한다.
+	 */
+	listAudioInputDevices(): Promise<MediaDeviceInfo[]>;
 }
 
 /** 전사 언어 드롭다운 옵션(설정 탭과 동일한 집합). */
@@ -133,8 +147,31 @@ export function renderSidebarInlineControls(
 	const t = host.t;
 	const container = root.createDiv({ cls: "transcribe-inline-controls" });
 
-	// ── 언어 드롭다운 ────────────────────────────────────────────
-	const langRow = container.createDiv({ cls: "transcribe-inline-row" });
+	// 카테고리 그룹을 만드는 헬퍼.
+	// 각 그룹은 `<section>` 으로 만들고 상단에 작은 헤더 라벨을 단다.
+	// `data-group` 속성으로 외부(테스트/스타일)에서 그룹 단위로 식별이 가능하게 한다.
+	const createGroup = (
+		groupId: "input" | "engine" | "output",
+		title: string,
+	): HTMLElement => {
+		const section = container.createEl("section", {
+			cls: "transcribe-inline-group",
+			attr: { "data-group": groupId },
+		});
+		section.createDiv({
+			cls: "transcribe-inline-group-title",
+			text: title,
+		});
+		return section;
+	};
+
+	const inputGroup = createGroup("input", t.sidebar.groupInput);
+	const engineGroup = createGroup("engine", t.sidebar.groupEngine);
+	const outputGroup = createGroup("output", t.sidebar.groupOutput);
+
+	// ─── 입력 그룹 ──────────────────────────────────────────────
+	// 입력 언어 드롭다운.
+	const langRow = inputGroup.createDiv({ cls: "transcribe-inline-row" });
 	langRow.createSpan({
 		cls: "transcribe-inline-label",
 		text: t.sidebar.language,
@@ -153,61 +190,78 @@ export function renderSidebarInlineControls(
 		});
 	});
 
-	// ── 모델 드롭다운 + 새로고침 아이콘 ────────────────────────────
-	const modelRow = container.createDiv({ cls: "transcribe-inline-row" });
-	modelRow.createSpan({
+	// 마이크 선택 드롭다운 + 새로고침.
+	const micRow = inputGroup.createDiv({ cls: "transcribe-inline-row" });
+	micRow.createSpan({
 		cls: "transcribe-inline-label",
-		text: t.sidebar.model,
+		text: t.sidebar.microphone,
 	});
-
-	const modelSelect = modelRow.createEl("select", {
-		cls: "dropdown transcribe-inline-select transcribe-inline-select--model",
+	const micSelect = micRow.createEl("select", {
+		cls: "dropdown transcribe-inline-select transcribe-inline-select--mic",
+		attr: { "data-control": "audio-input-device" },
 	});
-	populateModelSelect(modelSelect, host);
-	host.registerDomEvent(modelSelect, "change", () => {
-		const next = modelSelect.value;
-		if (next.length === 0) return;
-		void Promise.resolve(host.setModelId(next)).catch((err) => {
-			console.error("[SidebarInlineControls] setModelId failed:", err);
+	// 캐시된 장치 목록(권한이 없으면 빈 label).
+	let cachedDevices: MediaDeviceInfo[] = [];
+	populateMicSelect(micSelect, cachedDevices, host);
+	host.registerDomEvent(micSelect, "change", () => {
+		const next = micSelect.value;
+		void Promise.resolve(host.setAudioInputDeviceId(next)).catch((err) => {
+			console.error(
+				"[SidebarInlineControls] setAudioInputDeviceId failed:",
+				err,
+			);
 		});
 	});
 
-	// 새로고침 아이콘 — 모델 카탈로그 재조회. 로딩 중에는 자신을 비활성화.
-	const refreshBtn = modelRow.createEl("button", {
+	const micRefreshBtn = micRow.createEl("button", {
 		cls: "transcribe-inline-refresh",
 		attr: {
 			type: "button",
-			"aria-label": t.sidebar.refreshModels,
-			title: t.sidebar.refreshModels,
+			"aria-label": t.sidebar.refreshMicrophones,
+			title: t.sidebar.refreshMicrophones,
 		},
 	});
-	setIcon(refreshBtn, "refresh-cw");
-
-	host.registerDomEvent(refreshBtn, "click", () => {
-		if (refreshBtn.hasAttribute("data-loading")) return;
-		refreshBtn.setAttribute("data-loading", "true");
-		refreshBtn.addClass("is-loading");
+	setIcon(micRefreshBtn, "refresh-cw");
+	host.registerDomEvent(micRefreshBtn, "click", () => {
+		if (micRefreshBtn.hasAttribute("data-loading")) return;
+		micRefreshBtn.setAttribute("data-loading", "true");
+		micRefreshBtn.addClass("is-loading");
 		void host
-			.refreshAvailableModels()
-			.then(() => {
-				populateModelSelect(modelSelect, host);
+			.listAudioInputDevices()
+			.then((devices) => {
+				cachedDevices = devices;
+				populateMicSelect(micSelect, cachedDevices, host);
 			})
 			.catch((err) => {
 				console.error(
-					"[SidebarInlineControls] refreshAvailableModels failed:",
+					"[SidebarInlineControls] listAudioInputDevices failed:",
 					err,
 				);
 			})
 			.finally(() => {
-				refreshBtn.removeAttribute("data-loading");
-				refreshBtn.removeClass("is-loading");
+				micRefreshBtn.removeAttribute("data-loading");
+				micRefreshBtn.removeClass("is-loading");
 			});
 	});
 
-	// ── v1.1 task 33 — 백엔드 선택 드롭다운 ────────────────────────
-	// 모델 항목 바로 아래에 배치하여 사용자가 "어떤 분석 모델로, 어떤 백엔드에서" 동작 중인지를
-	// 한 시야에 확인할 수 있게 한다. 설정 탭의 백엔드 드롭다운과 양방향 미러 동기화된다.
-	const backendRow = container.createDiv({ cls: "transcribe-inline-row" });
+	// 사이드바가 처음 그려질 때 자동으로 한 번 enumerate 한다 — 권한이 이미
+	// 부여되어 있으면 라벨 채움, 아니면 deviceId 만 받아 둔다.
+	void host
+		.listAudioInputDevices()
+		.then((devices) => {
+			cachedDevices = devices;
+			populateMicSelect(micSelect, cachedDevices, host);
+		})
+		.catch((err) => {
+			console.error(
+				"[SidebarInlineControls] initial listAudioInputDevices failed:",
+				err,
+			);
+		});
+
+	// ─── 엔진 그룹 ──────────────────────────────────────────────
+	// 백엔드 선택 드롭다운.
+	const backendRow = engineGroup.createDiv({ cls: "transcribe-inline-row" });
 	backendRow.createSpan({
 		cls: "transcribe-inline-label",
 		text: t.sidebar.backend,
@@ -238,12 +292,55 @@ export function renderSidebarInlineControls(
 		});
 	});
 
-	// ── v1.1 task 33 — 활성 전사 엔진 표시 (read-only) ─────────────
-	// 백엔드별로 어떤 엔진이 사용되는지 사용자에게 명시적으로 노출한다.
-	//   - cloud-only: "AWS Transcribe"
-	//   - local-only: "Hugging Face 모델 (<localModelId>)"
-	//   - auto: 두 엔진을 슬래시로 함께 표기
-	const engineRow = container.createDiv({
+	// 분석 모델 드롭다운 + 새로고침.
+	const modelRow = engineGroup.createDiv({ cls: "transcribe-inline-row" });
+	modelRow.createSpan({
+		cls: "transcribe-inline-label",
+		text: t.sidebar.model,
+	});
+	const modelSelect = modelRow.createEl("select", {
+		cls: "dropdown transcribe-inline-select transcribe-inline-select--model",
+	});
+	populateModelSelect(modelSelect, host);
+	host.registerDomEvent(modelSelect, "change", () => {
+		const next = modelSelect.value;
+		if (next.length === 0) return;
+		void Promise.resolve(host.setModelId(next)).catch((err) => {
+			console.error("[SidebarInlineControls] setModelId failed:", err);
+		});
+	});
+	const refreshBtn = modelRow.createEl("button", {
+		cls: "transcribe-inline-refresh",
+		attr: {
+			type: "button",
+			"aria-label": t.sidebar.refreshModels,
+			title: t.sidebar.refreshModels,
+		},
+	});
+	setIcon(refreshBtn, "refresh-cw");
+	host.registerDomEvent(refreshBtn, "click", () => {
+		if (refreshBtn.hasAttribute("data-loading")) return;
+		refreshBtn.setAttribute("data-loading", "true");
+		refreshBtn.addClass("is-loading");
+		void host
+			.refreshAvailableModels()
+			.then(() => {
+				populateModelSelect(modelSelect, host);
+			})
+			.catch((err) => {
+				console.error(
+					"[SidebarInlineControls] refreshAvailableModels failed:",
+					err,
+				);
+			})
+			.finally(() => {
+				refreshBtn.removeAttribute("data-loading");
+				refreshBtn.removeClass("is-loading");
+			});
+	});
+
+	// 활성 전사 엔진 표시 (read-only).
+	const engineRow = engineGroup.createDiv({
 		cls: "transcribe-inline-row transcribe-inline-row--engine",
 	});
 	engineRow.createSpan({
@@ -259,8 +356,7 @@ export function renderSidebarInlineControls(
 		),
 	});
 
-	// ── v1.1 신규 (task 24) — 화자 분리 / 번역 / 대상 언어 미러 컨트롤 ──
-
+	// ─── 출력 그룹 ──────────────────────────────────────────────
 	// 모드 게이트 (Requirement 14.2, 14.3) — `local-only` 일 때 미러 컨트롤
 	// 3 개를 disabled 로 렌더링하고 툴팁을 부착한다. 토글의 표시상 강제 OFF 는
 	// 컨트롤 단위로 결정한다 — settings 값 자체는 변경하지 않으므로 클라우드
@@ -268,8 +364,8 @@ export function renderSidebarInlineControls(
 	const isOfflineGated = host.getCurrentBackendSelectionMode() === "local-only";
 	const offlineTooltip = t.notices.tooltipOnlineOnlyFeature;
 
-	// 화자 분리 토글 — 설정 탭과 양방향 미러 (Requirement 6.2).
-	const speakerRow = container.createDiv({ cls: "transcribe-inline-row" });
+	// 화자 분리 토글.
+	const speakerRow = outputGroup.createDiv({ cls: "transcribe-inline-row" });
 	speakerRow.createSpan({
 		cls: "transcribe-inline-label",
 		text: t.sidebar.speaker,
@@ -282,7 +378,6 @@ export function renderSidebarInlineControls(
 			"aria-label": t.sidebar.speaker,
 		},
 	});
-	// `local-only` 인 경우 표시상 강제 OFF (saved settings 는 변경하지 않음).
 	speakerToggle.checked = isOfflineGated
 		? false
 		: host.getCurrentSpeakerDiarizationEnabled();
@@ -300,8 +395,10 @@ export function renderSidebarInlineControls(
 		});
 	});
 
-	// 실시간 번역 토글 — 설정 탭과 양방향 미러 (Requirement 13.2).
-	const translationRow = container.createDiv({ cls: "transcribe-inline-row" });
+	// 실시간 번역 토글.
+	const translationRow = outputGroup.createDiv({
+		cls: "transcribe-inline-row",
+	});
 	translationRow.createSpan({
 		cls: "transcribe-inline-label",
 		text: t.sidebar.translation,
@@ -331,8 +428,10 @@ export function renderSidebarInlineControls(
 		});
 	});
 
-	// 번역 대상 언어 드롭다운 — 7 개 화이트리스트 (Requirement 13.3).
-	const targetLangRow = container.createDiv({ cls: "transcribe-inline-row" });
+	// 번역 언어 드롭다운.
+	const targetLangRow = outputGroup.createDiv({
+		cls: "transcribe-inline-row",
+	});
 	targetLangRow.createSpan({
 		cls: "transcribe-inline-label",
 		text: t.sidebar.targetLanguage,
@@ -360,9 +459,8 @@ export function renderSidebarInlineControls(
 		);
 	});
 
-	// 번역 출력 형식 드롭다운 (Requirement 13.7) — 노트 저장 시 inline / none.
-	// 모드 게이트(Requirement 14.2) 와 동일한 패턴으로 `local-only` 시 disabled.
-	const outputFormatRow = container.createDiv({
+	// 번역 출력 형식 드롭다운 — 노트 저장 시 inline / none.
+	const outputFormatRow = outputGroup.createDiv({
 		cls: "transcribe-inline-row",
 	});
 	outputFormatRow.createSpan({
@@ -455,6 +553,61 @@ function populateModelSelect(
 			value: "",
 			text: host.t.sidebar.noModelsHint,
 		});
+	}
+}
+
+/**
+ * 마이크 드롭다운 옵션을 enumerate 결과 + 저장된 deviceId 기준으로 재구성한다.
+ *
+ * - 첫 옵션은 항상 "시스템 기본 장치" (`value=""`).
+ * - 권한이 없어 `label` 이 빈 경우 `microphoneUnknown(idx)` 로 fallback 라벨 합성.
+ * - 저장된 deviceId 가 더 이상 enumerate 결과에 없으면 맨 아래에 별도 옵션으로
+ *   추가해 사용자에게 "현재 선택값이 사라졌음" 을 시각적으로 알린다.
+ */
+function populateMicSelect(
+	selectEl: HTMLSelectElement,
+	devices: readonly MediaDeviceInfo[],
+	host: SidebarInlineControlsHost,
+): void {
+	selectEl.empty();
+	const current = host.getCurrentAudioInputDeviceId();
+
+	// 시스템 기본 장치 옵션 — 항상 맨 위.
+	const defaultOpt = selectEl.createEl("option", {
+		value: "",
+		text: host.t.sidebar.microphoneDefault,
+	});
+	if (current.length === 0) {
+		defaultOpt.selected = true;
+	}
+
+	const knownIds = new Set<string>();
+	devices.forEach((device, idx) => {
+		const id = device.deviceId;
+		if (id.length === 0 || id === "default") {
+			// `"default"` 는 OS 기본 장치 alias 이므로 위 옵션과 중복.
+			return;
+		}
+		knownIds.add(id);
+		const label =
+			device.label.length > 0
+				? device.label
+				: host.t.sidebar.microphoneUnknown(idx + 1);
+		const opt = selectEl.createEl("option", { value: id, text: label });
+		if (id === current) {
+			opt.selected = true;
+		}
+	});
+
+	// 저장된 deviceId 가 enumerate 결과에 없으면 살아있는 옵션으로 노출 — 사용자가
+	// "선택했지만 사라진" 장치를 인지할 수 있게 한다. 새 세션 시작 시 AudioCapture 가
+	// `OverconstrainedError` 폴백으로 자동 기본 장치로 돌아간다.
+	if (current.length > 0 && !knownIds.has(current)) {
+		const opt = selectEl.createEl("option", {
+			value: current,
+			text: current,
+		});
+		opt.selected = true;
 	}
 }
 

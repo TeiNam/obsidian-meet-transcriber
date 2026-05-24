@@ -176,6 +176,14 @@ export default class TranscribePlugin extends Plugin {
 	 */
 	private cachedModels: BedrockCatalogEntry[] = [];
 
+	/**
+	 * 오디오 캡처 서비스 — 마이크 권한, PCM 청크, 입력 장치 enumerate 담당.
+	 *
+	 * `TranscribeService` / `Local_Whisper_Service` 가 동일 인스턴스를 공유하며, 사이드바의
+	 * 마이크 드롭다운이 `listAudioInputDevices()` 를 호출할 때도 이 인스턴스를 사용한다.
+	 */
+	private audioCapture!: AudioCapture;
+
 	/** Transcript_Note I/O 래퍼. */
 	noteStore!: NoteStore;
 
@@ -304,11 +312,11 @@ export default class TranscribePlugin extends Plugin {
 		// `AudioCapture` 가 이 소스로 Blob URL 을 생성해 audioWorklet.addModule 에 전달한다.
 		// 별도 리소스 파일 배포가 불필요하며, Obsidian 의 `app://` 리소스 URL 에서 발생하는
 		// `AbortError: Unable to load a worklet's module` 도 우회한다.
-		const audioCapture = new AudioCapture({
+		this.audioCapture = new AudioCapture({
 			workletSource: pcmWorkletSource,
 		});
 		this.transcribeService = new TranscribeService(
-			audioCapture,
+			this.audioCapture,
 			(credentials, region) =>
 				new TranscribeStreamingClient({
 					region,
@@ -327,7 +335,7 @@ export default class TranscribePlugin extends Plugin {
 		// 점유하지 않는다 (Requirement 10.4 단일 워커 불변식: 워커는 첫 `start()` 시점에
 		// 만들어지고 `dispose()` 시 해제됨).
 		this.localWhisperService = new Local_Whisper_Service(
-			audioCapture,
+			this.audioCapture,
 			() => new WhisperWorkerClient(this.resolveWhisperWorkerUrl()),
 		);
 
@@ -672,6 +680,34 @@ export default class TranscribePlugin extends Plugin {
 	/** 현재 메모리에 캐시된 Bedrock 모델 카탈로그. */
 	getAvailableModels(): BedrockCatalogEntry[] {
 		return this.cachedModels;
+	}
+
+	/** 현재 설정에 저장된 마이크 deviceId. 빈 문자열은 시스템 기본 장치를 의미한다. */
+	getCurrentAudioInputDeviceId(): string {
+		return this.settings.audioInputDeviceId;
+	}
+
+	/**
+	 * 사이드바에서 선택된 마이크 deviceId 를 설정에 저장한다.
+	 *
+	 * 빈 문자열은 "시스템 기본 장치" 의미. 다음 세션 시작 시점부터 적용되며, 활성 세션 중
+	 * 변경하더라도 진행 중인 MediaStream 은 영향을 받지 않는다(설정 변경 직후 사용자가
+	 * stop → start 를 다시 누르면 새 장치로 세션이 열린다).
+	 */
+	async setAudioInputDeviceId(deviceId: string): Promise<void> {
+		this.settings = { ...this.settings, audioInputDeviceId: deviceId };
+		await this.persistSettings();
+		this.rerenderOpenSettingTab();
+	}
+
+	/**
+	 * 현재 OS / 브라우저가 노출하는 오디오 입력 장치 목록을 반환한다.
+	 *
+	 * 권한이 없으면 `label` 이 빈 문자열로 반환되므로, 사이드바는 호출 전에
+	 * `requestPermission()` 으로 한 번 권한을 받아두고 호출한다.
+	 */
+	async listAudioInputDevices(): Promise<MediaDeviceInfo[]> {
+		return this.audioCapture.listInputDevices();
 	}
 
 	/**
@@ -1086,6 +1122,7 @@ export default class TranscribePlugin extends Plugin {
 				languageCode: this.settings.languageCode,
 				vocabularyName: this.settings.transcribeVocabularyName,
 				showSpeakerLabel: this.settings.speakerDiarizationEnabled,
+				audioInputDeviceId: this.settings.audioInputDeviceId,
 				callbacks: this.buildTranscribeCallbacks(),
 			});
 		} catch (err) {
@@ -1126,6 +1163,7 @@ export default class TranscribePlugin extends Plugin {
 				modelId,
 				modelFilePath: installation.filePath,
 				streamingDisplayMode: this.settings.streamingDisplayMode,
+				audioInputDeviceId: this.settings.audioInputDeviceId,
 				callbacks: this.buildLocalWhisperCallbacks(),
 			});
 		} catch (err) {
@@ -1741,6 +1779,7 @@ export default class TranscribePlugin extends Plugin {
 				modelId,
 				modelFilePath: installation.filePath,
 				streamingDisplayMode: this.settings.streamingDisplayMode,
+				audioInputDeviceId: this.settings.audioInputDeviceId,
 				callbacks: this.buildLocalWhisperCallbacks(),
 			});
 		} catch (err) {

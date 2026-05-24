@@ -341,6 +341,17 @@ export interface TranscribeSettings {
 	 * `"none"`은 노트에 번역을 저장하지 않는다(Requirement 13.7). 기본값 `"inline"`.
 	 */
 	translationOutputFormat: Translation_Output_Format;
+
+	/**
+	 * 사용할 마이크(오디오 입력 장치) `MediaDeviceInfo.deviceId`.
+	 *
+	 * 빈 문자열이면 OS / 브라우저의 기본 입력 장치를 사용한다(기존 동작).
+	 * 사이드바 인라인 컨트롤의 "Microphone" 드롭다운에서 즉시 변경 가능하며,
+	 * 저장된 deviceId 가 더 이상 존재하지 않으면 `getUserMedia` 가
+	 * `OverconstrainedError` 를 던지므로 `AudioCapture` 가 자동으로 기본 장치로
+	 * 폴백한다(`AudioCapture.requestPermission` 의 fallback 흐름).
+	 */
+	audioInputDeviceId: string;
 }
 
 /**
@@ -386,4 +397,5 @@ export const DEFAULT_SETTINGS: TranscribeSettings = {
 	translationEnabled: false,
 	translationTargetLanguage: "en",
 	translationOutputFormat: "inline",
+	audioInputDeviceId: "",
 };

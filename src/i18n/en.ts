@@ -48,11 +48,22 @@ export const en = {
     // 사이드바 인라인 컨트롤(언어/모델 선택) 라벨.
     // 설정 탭을 거치지 않고도 빠르게 세션 언어/분석 모델을 바꿀 수 있도록 하는 영역의 i18n.
     sidebar: {
-        language: "Language",
-        model: "Model",
+        // 카테고리 그룹 헤더 — 입력/엔진/출력으로 컨트롤을 묶어 시각적 위계를 부여한다.
+        groupInput: "Input",
+        groupEngine: "Engine",
+        groupOutput: "Output",
+        // 라벨 표현은 제품 사용자가 더 직관적으로 이해하도록 정리한다 (사용자 요구).
+        language: "Input language",
+        model: "Analysis model",
         refreshModels: "Refresh models",
         modelsLoading: "Loading...",
         noModelsHint: "Enter credentials and refresh.",
+        // 마이크 선택 드롭다운 — 사이드바에서 입력 장치를 즉시 변경.
+        microphone: "Microphone",
+        microphoneDefault: "System default",
+        refreshMicrophones: "Refresh microphones",
+        // 권한 미부여 / 장치 enumerate 실패 시 라벨 fallback.
+        microphoneUnknown: (idx: number): string => `Microphone ${idx}`,
         // 백엔드 선택 컨트롤 (task 33) — 사이드바에서 클라우드/로컬/자동 모드를 즉시 전환.
         backend: "Backend",
         backendOptions: {
@@ -62,14 +73,14 @@ export const en = {
         },
         // 활성 전사 엔진 표시 라벨 (task 33). cloud 백엔드 시 "AWS Transcribe", local 백엔드 시
         // "Hugging Face model (<localModelId>)" 형태로 노출된다.
-        activeEngine: "Engine",
+        activeEngine: "Active engine",
         cloudEngineLabel: "AWS Transcribe",
         localEngineLabel: (modelId: string): string =>
             `Hugging Face model (${modelId.length > 0 ? modelId : "—"})`,
         // 화자 분리/번역 컨트롤 라벨 — task 24 에서 도입, task 28 에서 톤 정렬.
         speaker: "Speaker labels",
         translation: "Translation",
-        targetLanguage: "Target language",
+        targetLanguage: "Translation language",
         // 화자 분리 활성 시 사이드바 상단에 항상 노출되는 안내 라벨 (Requirement 6.8).
         speakerCapacityNotice:
             "Up to 10 simultaneous speakers can be identified",

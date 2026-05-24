@@ -51,11 +51,21 @@ export const ko: Translations = {
     // 사이드바 인라인 컨트롤(언어/모델 선택) 라벨.
     // 설정 탭을 거치지 않고도 빠르게 세션 언어/분석 모델을 바꿀 수 있도록 하는 영역의 i18n.
     sidebar: {
-        language: "언어",
-        model: "모델",
+        // 카테고리 그룹 헤더 — 입력/엔진/출력으로 컨트롤을 묶는다.
+        groupInput: "입력",
+        groupEngine: "엔진",
+        groupOutput: "출력",
+        // 라벨은 사용자 직관성을 위해 명확하게 표현한다 (사용자 요구).
+        language: "입력 언어",
+        model: "분석 모델",
         refreshModels: "모델 목록 새로고침",
         modelsLoading: "불러오는 중...",
         noModelsHint: "자격 증명을 입력하고 새로고침을 눌러 주세요.",
+        // 마이크 선택 드롭다운 — 사이드바에서 입력 장치를 즉시 변경.
+        microphone: "마이크",
+        microphoneDefault: "시스템 기본 장치",
+        refreshMicrophones: "마이크 목록 새로고침",
+        microphoneUnknown: (idx: number): string => `마이크 ${idx}`,
         // 백엔드 선택 컨트롤 (task 33) — 사이드바에서 클라우드/로컬/자동 모드를 즉시 전환.
         backend: "백엔드",
         backendOptions: {
@@ -65,14 +75,14 @@ export const ko: Translations = {
         },
         // 활성 전사 엔진 표시 라벨 (task 33). cloud 백엔드 시 "AWS Transcribe", local 백엔드 시
         // "Hugging Face 모델 (<localModelId>)" 형태로 노출된다.
-        activeEngine: "엔진",
+        activeEngine: "활성 엔진",
         cloudEngineLabel: "AWS Transcribe",
         localEngineLabel: (modelId: string): string =>
             `Hugging Face 모델 (${modelId.length > 0 ? modelId : "—"})`,
         // 화자 분리/번역 컨트롤 라벨 — task 24 에서 도입, task 28 에서 톤 정렬.
         speaker: "화자 분리",
         translation: "번역",
-        targetLanguage: "대상 언어",
+        targetLanguage: "번역 언어",
         // 화자 분리 활성 시 사이드바 상단에 항상 노출되는 안내 라벨 (Requirement 6.8).
         speakerCapacityNotice: "최대 10명까지 동시 화자를 인식할 수 있습니다",
         // 청크 결과가 200ms 초과 지연될 때 표시되는 인디케이터 텍스트 (Requirement 10.2).

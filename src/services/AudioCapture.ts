@@ -114,7 +114,7 @@ export class AudioCapture {
 	 *
 	 * Requirements 3.1.
 	 */
-	async requestPermission(): Promise<MediaStream> {
+	async requestPermission(deviceId?: string): Promise<MediaStream> {
 		const getUserMedia = this.resolveGetUserMedia();
 		if (!getUserMedia) {
 			throw new TranscribeError(
@@ -123,14 +123,21 @@ export class AudioCapture {
 			);
 		}
 
+		// 사용자가 사이드바에서 특정 마이크를 선택한 경우 `exact` 제약으로 강제한다.
+		// 빈 문자열 / undefined 는 OS / 브라우저 기본 장치를 의미한다.
+		const wantsSpecificDevice =
+			typeof deviceId === "string" && deviceId.length > 0;
+
 		// 1차: 관대한 ideal 힌트. sampleRate 는 요청하지 않는다(worklet 이 다운샘플링).
 		try {
-			return await getUserMedia({
-				audio: {
-					channelCount: { ideal: 1 },
-					echoCancellation: { ideal: true },
-				},
-			});
+			const audioConstraints: MediaTrackConstraints = {
+				channelCount: { ideal: 1 },
+				echoCancellation: { ideal: true },
+			};
+			if (wantsSpecificDevice) {
+				audioConstraints.deviceId = { exact: deviceId };
+			}
+			return await getUserMedia({ audio: audioConstraints });
 		} catch (err) {
 			const name = err instanceof Error ? err.name : "";
 			const message = err instanceof Error ? err.message : String(err);
@@ -310,6 +317,33 @@ export class AudioCapture {
 			this.teardownAudioGraph(source, node);
 			await this.closeContext(ctx);
 			throw err;
+		}
+	}
+
+	/**
+	 * 사용 가능한 오디오 입력 장치(`audioinput`) 목록을 열거한다.
+	 *
+	 * 사이드바 마이크 선택 드롭다운이 호출한다. 권한이 부여되지 않은 상태에서는
+	 * `label` 이 빈 문자열로 반환되므로, 보통 `requestPermission()` 으로 권한을
+	 * 먼저 받은 뒤 호출한다. `navigator.mediaDevices` 가 없는 환경(JSDOM 등)에서는
+	 * 빈 배열을 반환한다.
+	 *
+	 * 본 메서드는 트랙을 시작하지 않으며 부수 효과 없이 즉시 결과를 반환한다.
+	 */
+	async listInputDevices(): Promise<MediaDeviceInfo[]> {
+		if (
+			typeof navigator === "undefined" ||
+			!navigator.mediaDevices ||
+			typeof navigator.mediaDevices.enumerateDevices !== "function"
+		) {
+			return [];
+		}
+		try {
+			const devices = await navigator.mediaDevices.enumerateDevices();
+			return devices.filter((d) => d.kind === "audioinput");
+		} catch (err) {
+			console.error("[Transcribe] enumerateDevices failed:", err);
+			return [];
 		}
 	}
 

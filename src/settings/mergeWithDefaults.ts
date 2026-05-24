@@ -173,6 +173,10 @@ export function mergeWithDefaults(
 	if (typeof base.modelFolder !== "string") {
 		base.modelFolder = "";
 	}
+	// 마이크 deviceId — 빈 문자열은 OS/브라우저 기본 장치를 의미한다.
+	if (typeof base.audioInputDeviceId !== "string") {
+		base.audioInputDeviceId = "";
+	}
 
 	return base;
 }

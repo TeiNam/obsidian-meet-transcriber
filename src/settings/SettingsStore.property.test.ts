@@ -103,6 +103,7 @@ const validSettingsArb: fc.Arbitrary<TranscribeSettings> = fc.record({
 	transcribeVocabularyName: fc.string({ maxLength: 200 }),
 	vocabularyPhrases: fc.string(),
 	analysisGlossary: fc.string(),
+	audioInputDeviceId: fc.string({ maxLength: 128 }),
 	// v1.1 신규 필드 — `validate`가 검증하지 않으므로 화이트리스트 내에서 임의 선택.
 	backendSelectionMode: fc.constantFrom<Backend_Selection_Mode>(
 		...ALLOWED_BACKEND_MODES,

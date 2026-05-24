@@ -106,6 +106,7 @@ describe("SettingsStore.load — 기본값 머지 (Requirement 2.11)", () => {
 			transcribeVocabularyName: "",
 			vocabularyPhrases: "",
 			analysisGlossary: "",
+			audioInputDeviceId: "",
 			// v1.1 신규 필드 — DEFAULT_SETTINGS의 비활성 측 값과 동일.
 			backendSelectionMode: "cloud-only",
 			localModelId: "",
@@ -163,6 +164,7 @@ describe("SettingsStore.save — 저장 위임 및 에러 전파 (Requirement 2.
 		transcribeVocabularyName: "",
 		vocabularyPhrases: "",
 		analysisGlossary: "",
+		audioInputDeviceId: "",
 		// v1.1 신규 필드 — DEFAULT_SETTINGS의 비활성 측 값과 동일.
 		backendSelectionMode: "cloud-only",
 		localModelId: "",

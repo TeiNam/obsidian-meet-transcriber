@@ -184,6 +184,14 @@ export interface TranscribePluginLike {
 	 * 그대로 전달한다. 빈 문자열은 "미선택" 으로 간주한다.
 	 */
 	getCurrentLocalModelId(): string;
+
+	// ─── 마이크 선택 ───
+	/** 현재 설정의 입력 장치 deviceId. 빈 문자열은 시스템 기본 장치. */
+	getCurrentAudioInputDeviceId(): string;
+	/** 입력 장치 변경을 설정에 반영하고 저장한다. */
+	setAudioInputDeviceId(deviceId: string): Promise<void> | void;
+	/** OS / 브라우저가 노출하는 입력 장치 목록을 enumerate 한다. */
+	listAudioInputDevices(): Promise<MediaDeviceInfo[]>;
 }
 
 /**

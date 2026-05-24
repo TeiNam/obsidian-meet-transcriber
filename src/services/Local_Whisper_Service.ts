@@ -120,6 +120,12 @@ export interface LocalWhisperStartParams {
 	readonly modelFilePath: string;
 	readonly streamingDisplayMode: Streaming_Display_Mode;
 	readonly callbacks: LocalWhisperCallbacks;
+	/**
+	 * 사용할 마이크(`MediaDeviceInfo.deviceId`).
+	 *
+	 * 빈 문자열 / 미지정 시 OS / 브라우저 기본 입력 장치를 사용한다.
+	 */
+	readonly audioInputDeviceId?: string;
 }
 
 /**
@@ -264,7 +270,9 @@ export class Local_Whisper_Service {
 		// 마이크 권한 + MediaStream — 실패 시 즉시 에러 통지.
 		let mediaStream: MediaStream;
 		try {
-			mediaStream = await this.audioCapture.requestPermission();
+			mediaStream = await this.audioCapture.requestPermission(
+				params.audioInputDeviceId,
+			);
 		} catch (err) {
 			console.error(
 				"[Local_Whisper_Service] microphone permission failed:",
