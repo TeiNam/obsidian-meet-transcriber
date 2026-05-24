@@ -1,11 +1,10 @@
 // Transcribe 사이드바 인라인 컨트롤 — 언어 / Bedrock 모델 빠른 선택.
 //
 // 설정 탭을 거치지 않고도 세션마다 자주 바뀌는 두 설정을 사이드바에서 즉시
-// 변경할 수 있게 한다(사용자 요구 — 2026-05, TASK 13).
+// 변경할 수 있게 한다.
 //
 // 본 모듈은 DOM 렌더링 + 이벤트 바인딩만 담당하며, 실제 설정 저장/모델 목록
 // 조회/설정 탭 동기화는 호출자가 주입하는 `SidebarInlineControlsHost` 에 위임한다.
-// 이렇게 분리한 이유는 `SidebarView` 파일 크기 제약(코딩 스타일 800라인) 때문이다.
 //
 // 심사 기준 준수:
 // - `innerHTML` 금지 → `createEl` / `createSpan` / `setIcon` 사용.
@@ -17,7 +16,6 @@ import { setIcon, type App } from "obsidian";
 import type { Translations } from "../i18n";
 import type { BedrockCatalogEntry } from "../services/BedrockModelCatalog";
 import type {
-	Backend_Selection_Mode,
 	Curated_Target_Language,
 	LanguageCode,
 	Translation_Output_Format,
@@ -25,9 +23,6 @@ import type {
 
 /**
  * 인라인 컨트롤이 호스트(`TranscribePlugin` 또는 stub)에게 요구하는 최소 계약.
- *
- * `SidebarView.TranscribePluginLike` 와 중복되는 필드도 있으나, 이 모듈이 직접
- * 필요로 하는 것만 추려 느슨한 결합을 유지한다.
  */
 export interface SidebarInlineControlsHost {
 	app: App;
@@ -50,67 +45,23 @@ export interface SidebarInlineControlsHost {
 	/** 새로고침 아이콘 클릭 시 AWS 에서 카탈로그를 재조회한다. 실패 시 throw. */
 	refreshAvailableModels(): Promise<BedrockCatalogEntry[]>;
 
-	// ─── v1.1 신규 (task 24) — 미러 컨트롤 ───
-	/** 현재 설정의 화자 분리 활성 여부 (Requirement 6.2). */
+	// ─── 미러 컨트롤 ───
 	getCurrentSpeakerDiarizationEnabled(): boolean;
-	/** 화자 분리 토글 — 설정 탭 토글과 양방향 미러 동기화 (Requirement 6.2). */
 	setSpeakerDiarizationEnabled(enabled: boolean): Promise<void> | void;
-	/** 현재 설정의 실시간 번역 활성 여부 (Requirement 13.2). */
 	getCurrentTranslationEnabled(): boolean;
-	/** 번역 토글 — 설정 탭 토글과 양방향 미러 동기화 (Requirement 13.2). */
 	setTranslationEnabled(enabled: boolean): Promise<void> | void;
-	/** 현재 설정의 번역 대상 언어 (Requirement 13.3). */
 	getCurrentTranslationTargetLanguage(): Curated_Target_Language;
-	/** 번역 대상 언어 드롭다운 — 설정 탭과 양방향 미러 동기화. */
 	setTranslationTargetLanguage(
 		lang: Curated_Target_Language,
 	): Promise<void> | void;
-	/** 현재 설정의 번역 출력 형식 (Requirement 13.7). */
 	getCurrentTranslationOutputFormat(): Translation_Output_Format;
-	/** 번역 출력 형식 드롭다운 — inline / none. */
 	setTranslationOutputFormat(
 		format: Translation_Output_Format,
 	): Promise<void> | void;
-	/**
-	 * 현재 설정의 백엔드 선택 모드 (Requirement 14.2, 14.3).
-	 *
-	 * `local-only` 일 때 사이드바 인라인 컨트롤은 idle 상태에서도 (a) 번역 토글,
-	 * (b) 번역 대상 언어 드롭다운, (c) 화자 분리 토글 3 개 컨트롤을 disabled 로
-	 * 렌더링하고 툴팁 `tooltipOnlineOnlyFeature` 를 부착한다. (d) AI 분석 버튼은
-	 * `SidebarView.renderControls()` 가 따로 그리므로 본 모듈의 책임이 아니다.
-	 *
-	 * `auto` / `cloud-only` 에서는 자유 조작을 허용한다 (Requirement 14.3).
-	 */
-	getCurrentBackendSelectionMode(): Backend_Selection_Mode;
-	/**
-	 * 백엔드 선택 모드 변경을 설정에 반영하고 저장한다 (task 33).
-	 *
-	 * 사이드바 백엔드 드롭다운에서 즉시 모드를 전환할 수 있도록 host 가 노출하는
-	 * setter 다. 설정 탭의 동일 드롭다운과 동일하게 인라인 컨트롤 disabled 상태가
-	 * 즉시 갱신되어야 하므로 호출 측은 저장 직후 `SidebarView.render()` 를
-	 * 트리거한다(또는 host 가 알아서 트리거).
-	 */
-	setBackendSelectionMode(mode: Backend_Selection_Mode): Promise<void> | void;
-	/**
-	 * 현재 설정의 로컬 Whisper 모델 식별자 (task 33).
-	 *
-	 * 활성 엔진 표시 라벨에서 local 백엔드일 때 모델명을 노출하기 위해 host 가
-	 * 그대로 전달한다. 빈 문자열은 "미선택" 으로 간주한다.
-	 */
-	getCurrentLocalModelId(): string;
 
 	// ─── 마이크 선택 ───
-	/** 현재 설정에 저장된 입력 장치 deviceId. 빈 문자열은 시스템 기본 장치. */
 	getCurrentAudioInputDeviceId(): string;
-	/** 입력 장치 변경을 설정에 반영하고 저장한다. 빈 문자열로 "기본 장치" 선택. */
 	setAudioInputDeviceId(deviceId: string): Promise<void> | void;
-	/**
-	 * 현재 OS / 브라우저가 노출하는 입력 장치 목록을 enumerate 한다.
-	 *
-	 * 새로고침 버튼을 누르면 host 가 먼저 `requestPermission()` 으로 권한을 받고
-	 * 본 메서드를 호출한다. 권한이 없으면 빈 `label` 이 반환되며, 본 모듈이
-	 * `microphoneUnknown(idx)` 로 라벨을 합성한다.
-	 */
 	listAudioInputDevices(): Promise<MediaDeviceInfo[]>;
 }
 
@@ -118,10 +69,7 @@ export interface SidebarInlineControlsHost {
 const LANGUAGE_CODE_OPTIONS: readonly LanguageCode[] = ["ko-KR", "en-US"];
 
 /**
- * 번역 대상 언어 드롭다운 옵션 (Requirement 13.3, `Curated_Target_Language_List`).
- *
- * 7 개 화이트리스트와 정확히 일치한다. 사이드바는 폭이 좁아 풀 표시명 대신 ISO 코드만
- * 노출한다(설정 탭에서 풀 표시명이 보이므로 사용자 인지 비용은 낮다).
+ * 번역 대상 언어 드롭다운 옵션 (`Curated_Target_Language_List`).
  */
 const CURATED_TARGET_LANGUAGE_OPTIONS: readonly Curated_Target_Language[] = [
 	"en",
@@ -135,10 +83,6 @@ const CURATED_TARGET_LANGUAGE_OPTIONS: readonly Curated_Target_Language[] = [
 
 /**
  * 언어/모델 빠른 선택 영역을 그리는 헬퍼.
- *
- * 반환값(`refreshModelOptions`)은 호스트가 모델 목록을 새로 받아왔을 때
- * 드롭다운 옵션만 다시 채우도록 하는 얇은 API 다. 전체 re-render 가 필요하면
- * `SidebarView.render()` 를 호출하면 된다.
  */
 export function renderSidebarInlineControls(
 	root: HTMLElement,
@@ -147,9 +91,6 @@ export function renderSidebarInlineControls(
 	const t = host.t;
 	const container = root.createDiv({ cls: "transcribe-inline-controls" });
 
-	// 카테고리 그룹을 만드는 헬퍼.
-	// 각 그룹은 `<section>` 으로 만들고 상단에 작은 헤더 라벨을 단다.
-	// `data-group` 속성으로 외부(테스트/스타일)에서 그룹 단위로 식별이 가능하게 한다.
 	const createGroup = (
 		groupId: "input" | "engine" | "output",
 		title: string,
@@ -170,7 +111,6 @@ export function renderSidebarInlineControls(
 	const outputGroup = createGroup("output", t.sidebar.groupOutput);
 
 	// ─── 입력 그룹 ──────────────────────────────────────────────
-	// 입력 언어 드롭다운.
 	const langRow = inputGroup.createDiv({ cls: "transcribe-inline-row" });
 	langRow.createSpan({
 		cls: "transcribe-inline-label",
@@ -190,7 +130,6 @@ export function renderSidebarInlineControls(
 		});
 	});
 
-	// 마이크 선택 드롭다운 + 새로고침.
 	const micRow = inputGroup.createDiv({ cls: "transcribe-inline-row" });
 	micRow.createSpan({
 		cls: "transcribe-inline-label",
@@ -200,7 +139,6 @@ export function renderSidebarInlineControls(
 		cls: "dropdown transcribe-inline-select transcribe-inline-select--mic",
 		attr: { "data-control": "audio-input-device" },
 	});
-	// 캐시된 장치 목록(권한이 없으면 빈 label).
 	let cachedDevices: MediaDeviceInfo[] = [];
 	populateMicSelect(micSelect, cachedDevices, host);
 	host.registerDomEvent(micSelect, "change", () => {
@@ -244,8 +182,6 @@ export function renderSidebarInlineControls(
 			});
 	});
 
-	// 사이드바가 처음 그려질 때 자동으로 한 번 enumerate 한다 — 권한이 이미
-	// 부여되어 있으면 라벨 채움, 아니면 deviceId 만 받아 둔다.
 	void host
 		.listAudioInputDevices()
 		.then((devices) => {
@@ -260,39 +196,6 @@ export function renderSidebarInlineControls(
 		});
 
 	// ─── 엔진 그룹 ──────────────────────────────────────────────
-	// 백엔드 선택 드롭다운.
-	const backendRow = engineGroup.createDiv({ cls: "transcribe-inline-row" });
-	backendRow.createSpan({
-		cls: "transcribe-inline-label",
-		text: t.sidebar.backend,
-	});
-	const backendSelect = backendRow.createEl("select", {
-		cls: "dropdown transcribe-inline-select",
-		attr: { "data-control": "backend-selection-mode" },
-	});
-	const BACKEND_OPTIONS: readonly Backend_Selection_Mode[] = [
-		"cloud-only",
-		"local-only",
-		"auto",
-	];
-	for (const mode of BACKEND_OPTIONS) {
-		backendSelect.createEl("option", {
-			value: mode,
-			text: t.sidebar.backendOptions[mode],
-		});
-	}
-	backendSelect.value = host.getCurrentBackendSelectionMode();
-	host.registerDomEvent(backendSelect, "change", () => {
-		const next = backendSelect.value as Backend_Selection_Mode;
-		void Promise.resolve(host.setBackendSelectionMode(next)).catch((err) => {
-			console.error(
-				"[SidebarInlineControls] setBackendSelectionMode failed:",
-				err,
-			);
-		});
-	});
-
-	// 분석 모델 드롭다운 + 새로고침.
 	const modelRow = engineGroup.createDiv({ cls: "transcribe-inline-row" });
 	modelRow.createSpan({
 		cls: "transcribe-inline-label",
@@ -339,32 +242,7 @@ export function renderSidebarInlineControls(
 			});
 	});
 
-	// 활성 전사 엔진 표시 (read-only).
-	const engineRow = engineGroup.createDiv({
-		cls: "transcribe-inline-row transcribe-inline-row--engine",
-	});
-	engineRow.createSpan({
-		cls: "transcribe-inline-label",
-		text: t.sidebar.activeEngine,
-	});
-	engineRow.createSpan({
-		cls: "transcribe-inline-engine",
-		text: formatActiveEngineLabel(
-			host.getCurrentBackendSelectionMode(),
-			host.getCurrentLocalModelId(),
-			t,
-		),
-	});
-
 	// ─── 출력 그룹 ──────────────────────────────────────────────
-	// 모드 게이트 (Requirement 14.2, 14.3) — `local-only` 일 때 미러 컨트롤
-	// 3 개를 disabled 로 렌더링하고 툴팁을 부착한다. 토글의 표시상 강제 OFF 는
-	// 컨트롤 단위로 결정한다 — settings 값 자체는 변경하지 않으므로 클라우드
-	// 모드 복귀 시 사용자가 저장해 둔 토글 상태가 그대로 살아난다.
-	const isOfflineGated = host.getCurrentBackendSelectionMode() === "local-only";
-	const offlineTooltip = t.notices.tooltipOnlineOnlyFeature;
-
-	// 화자 분리 토글.
 	const speakerRow = outputGroup.createDiv({ cls: "transcribe-inline-row" });
 	speakerRow.createSpan({
 		cls: "transcribe-inline-label",
@@ -378,12 +256,7 @@ export function renderSidebarInlineControls(
 			"aria-label": t.sidebar.speaker,
 		},
 	});
-	speakerToggle.checked = isOfflineGated
-		? false
-		: host.getCurrentSpeakerDiarizationEnabled();
-	if (isOfflineGated) {
-		applyOfflineGate(speakerRow, speakerToggle, offlineTooltip);
-	}
+	speakerToggle.checked = host.getCurrentSpeakerDiarizationEnabled();
 	host.registerDomEvent(speakerToggle, "change", () => {
 		void Promise.resolve(
 			host.setSpeakerDiarizationEnabled(speakerToggle.checked),
@@ -395,7 +268,6 @@ export function renderSidebarInlineControls(
 		});
 	});
 
-	// 실시간 번역 토글.
 	const translationRow = outputGroup.createDiv({
 		cls: "transcribe-inline-row",
 	});
@@ -411,12 +283,7 @@ export function renderSidebarInlineControls(
 			"aria-label": t.sidebar.translation,
 		},
 	});
-	translationToggle.checked = isOfflineGated
-		? false
-		: host.getCurrentTranslationEnabled();
-	if (isOfflineGated) {
-		applyOfflineGate(translationRow, translationToggle, offlineTooltip);
-	}
+	translationToggle.checked = host.getCurrentTranslationEnabled();
 	host.registerDomEvent(translationToggle, "change", () => {
 		void Promise.resolve(
 			host.setTranslationEnabled(translationToggle.checked),
@@ -428,7 +295,6 @@ export function renderSidebarInlineControls(
 		});
 	});
 
-	// 번역 언어 드롭다운.
 	const targetLangRow = outputGroup.createDiv({
 		cls: "transcribe-inline-row",
 	});
@@ -444,9 +310,6 @@ export function renderSidebarInlineControls(
 		targetLangSelect.createEl("option", { value: code, text: code });
 	}
 	targetLangSelect.value = host.getCurrentTranslationTargetLanguage();
-	if (isOfflineGated) {
-		applyOfflineGate(targetLangRow, targetLangSelect, offlineTooltip);
-	}
 	host.registerDomEvent(targetLangSelect, "change", () => {
 		const next = targetLangSelect.value as Curated_Target_Language;
 		void Promise.resolve(host.setTranslationTargetLanguage(next)).catch(
@@ -459,7 +322,6 @@ export function renderSidebarInlineControls(
 		);
 	});
 
-	// 번역 출력 형식 드롭다운 — 노트 저장 시 inline / none.
 	const outputFormatRow = outputGroup.createDiv({
 		cls: "transcribe-inline-row",
 	});
@@ -480,9 +342,6 @@ export function renderSidebarInlineControls(
 		text: t.settings.translation.outputFormat.options.none,
 	});
 	outputFormatSelect.value = host.getCurrentTranslationOutputFormat();
-	if (isOfflineGated) {
-		applyOfflineGate(outputFormatRow, outputFormatSelect, offlineTooltip);
-	}
 	host.registerDomEvent(outputFormatSelect, "change", () => {
 		const next = outputFormatSelect.value as Translation_Output_Format;
 		void Promise.resolve(host.setTranslationOutputFormat(next)).catch(
@@ -502,10 +361,6 @@ export function renderSidebarInlineControls(
 
 /**
  * 모델 드롭다운 옵션을 호스트의 현재 카탈로그 + 저장된 값 기준으로 재구성한다.
- *
- * 저장된 값이 카탈로그에 없으면 맨 위에 직접 옵션으로 추가해 "새로고침 전에도
- * 마지막 사용 모델이 선택된 상태로 보이도록" 한다(설정 탭과 동일한 동작).
- * 카탈로그가 비어 있고 저장된 값도 없으면 placeholder 안내 옵션을 둔다.
  */
 function populateModelSelect(
 	selectEl: HTMLSelectElement,
@@ -539,7 +394,6 @@ function populateModelSelect(
 			const prefix = entry.kind === "inference-profile" ? "⚡ " : "";
 			const opt = group.createEl("option", {
 				value: entry.id,
-				// 사이드바는 폭이 좁으므로 id 는 생략하고 라벨만 노출한다.
 				text: `${prefix}${entry.label}`,
 			});
 			if (entry.id === current) {
@@ -558,11 +412,6 @@ function populateModelSelect(
 
 /**
  * 마이크 드롭다운 옵션을 enumerate 결과 + 저장된 deviceId 기준으로 재구성한다.
- *
- * - 첫 옵션은 항상 "시스템 기본 장치" (`value=""`).
- * - 권한이 없어 `label` 이 빈 경우 `microphoneUnknown(idx)` 로 fallback 라벨 합성.
- * - 저장된 deviceId 가 더 이상 enumerate 결과에 없으면 맨 아래에 별도 옵션으로
- *   추가해 사용자에게 "현재 선택값이 사라졌음" 을 시각적으로 알린다.
  */
 function populateMicSelect(
 	selectEl: HTMLSelectElement,
@@ -572,7 +421,6 @@ function populateMicSelect(
 	selectEl.empty();
 	const current = host.getCurrentAudioInputDeviceId();
 
-	// 시스템 기본 장치 옵션 — 항상 맨 위.
 	const defaultOpt = selectEl.createEl("option", {
 		value: "",
 		text: host.t.sidebar.microphoneDefault,
@@ -585,7 +433,6 @@ function populateMicSelect(
 	devices.forEach((device, idx) => {
 		const id = device.deviceId;
 		if (id.length === 0 || id === "default") {
-			// `"default"` 는 OS 기본 장치 alias 이므로 위 옵션과 중복.
 			return;
 		}
 		knownIds.add(id);
@@ -599,9 +446,6 @@ function populateMicSelect(
 		}
 	});
 
-	// 저장된 deviceId 가 enumerate 결과에 없으면 살아있는 옵션으로 노출 — 사용자가
-	// "선택했지만 사라진" 장치를 인지할 수 있게 한다. 새 세션 시작 시 AudioCapture 가
-	// `OverconstrainedError` 폴백으로 자동 기본 장치로 돌아간다.
 	if (current.length > 0 && !knownIds.has(current)) {
 		const opt = selectEl.createEl("option", {
 			value: current,
@@ -609,47 +453,4 @@ function populateMicSelect(
 		});
 		opt.selected = true;
 	}
-}
-
-/**
- * 활성 전사 엔진 라벨을 백엔드 모드 + 로컬 모델 ID 기준으로 합성한다 (task 33).
- *
- * - `cloud-only`: "AWS Transcribe"
- * - `local-only`: "Hugging Face model (<localModelId>)"
- * - `auto`: 두 엔진을 슬래시로 표기 — 자동 폴백 시 양쪽 모두 사용될 수 있음을 시사.
- *
- * 외부에서도 단위 테스트 가능하도록 export 한다.
- */
-export function formatActiveEngineLabel(
-	mode: Backend_Selection_Mode,
-	localModelId: string,
-	t: Translations,
-): string {
-	const cloudLabel = t.sidebar.cloudEngineLabel;
-	const localLabel = t.sidebar.localEngineLabel(localModelId);
-	if (mode === "cloud-only") return cloudLabel;
-	if (mode === "local-only") return localLabel;
-	return `${cloudLabel} / ${localLabel}`;
-}
-
-/**
- * 모드 게이트 (Requirement 14.2) — 사이드바 인라인 컨트롤을 disabled 상태로
- * 렌더링하고 툴팁/데이터 속성을 부착한다.
- *
- * - 컨트롤(`<input>` / `<select>`)의 `disabled` 와 `aria-label` / `title` 을 설정.
- * - 행 컨테이너(`row`)에 `data-disabled-reason="offline-mode"` 데이터 속성을 부착.
- *   설정 탭의 `applyOnlineOnlyGate` 와 동일한 규칙을 따라 PBT/예제 테스트가 사유를
- *   검증할 수 있게 한다 (design §4.8).
- */
-function applyOfflineGate(
-	row: HTMLElement,
-	control: HTMLInputElement | HTMLSelectElement,
-	tooltip: string,
-): void {
-	control.disabled = true;
-	control.setAttribute("aria-label", tooltip);
-	control.setAttribute("title", tooltip);
-	row.setAttribute("data-disabled-reason", "offline-mode");
-	row.setAttribute("aria-label", tooltip);
-	row.setAttribute("title", tooltip);
 }

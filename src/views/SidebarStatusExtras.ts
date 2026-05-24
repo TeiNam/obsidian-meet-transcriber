@@ -19,6 +19,7 @@
 
 import type { Translations } from "../i18n";
 import type { Transcript_Segment } from "../domain/segments";
+import { formatTimestamp } from "../domain/Sentence_Formatter";
 
 /** 화자별 색상 클래스 최댓값 (`speaker-1` ~ `speaker-10`). Requirement 6.8. */
 const MAX_SPEAKER_COLOR_CLASSES = 10;
@@ -32,6 +33,18 @@ const MAX_SPEAKER_COLOR_CLASSES = 10;
  */
 export interface AppendFinalLineOptions {
 	readonly translationEnabled: boolean;
+	/**
+	 * `true` 이면 라인 prefix 로 `[mm:ss]` 또는 `[hh:mm:ss]` 타임스탬프를 표시한다.
+	 * `Sentence_Formatter.formatTimestamp` 와 동일 포맷을 사용해 사이드바와 저장
+	 * 노트의 시각 표기가 일치하도록 한다 (Requirement 5.4).
+	 */
+	readonly timestampOutputEnabled?: boolean;
+	/**
+	 * `true` 이면서 segment 에 `speakerLabel` 이 있을 때만 화자 라벨을 그린다.
+	 * `false` 면 라벨이 있어도 그리지 않는다 (Requirement 5.5 — 화자 분리 토글이
+	 * 꺼지면 화자 라벨을 노출하지 않는다).
+	 */
+	readonly speakerDiarizationEnabled?: boolean;
 }
 
 /**
@@ -96,7 +109,16 @@ export function appendFinalLine(
 	const lineEl = container.createDiv({ cls: "line" });
 	lineEl.setAttr("data-segment-id", String(segment.segmentId));
 
-	if (segment.speakerLabel) {
+	if (options.timestampOutputEnabled) {
+		lineEl.createSpan({
+			cls: "timestamp-label",
+			text: `${formatTimestamp(segment.startSeconds)} `,
+		});
+	}
+
+	const showSpeaker =
+		(options.speakerDiarizationEnabled ?? true) && Boolean(segment.speakerLabel);
+	if (showSpeaker && segment.speakerLabel) {
 		const speakerSpan = lineEl.createSpan({
 			cls: "speaker-label",
 			text: `${segment.speakerLabel}: `,
@@ -183,32 +205,3 @@ export function renderTranslationCostCounter(
 	};
 }
 
-// ──────────────────────────────────────────────────────────────────────
-// Throttle indicator (Requirement 10.2)
-// ──────────────────────────────────────────────────────────────────────
-
-/**
- * 청크 처리 지연 인디케이터의 핸들.
- *
- * `Local_Whisper_Service` 가 청크 추론이 200ms 를 초과해 지연되는 것을 감지
- * 하면 `setActive(true)` 를 호출하고, 결과 도착 직후 `setActive(false)` 로
- * 숨긴다. 노드는 항상 DOM 에 두고 `is-hidden` 으로 토글한다.
- */
-export interface ThrottleIndicatorHandle {
-	setActive(active: boolean): void;
-}
-
-export function renderThrottleIndicator(
-	root: HTMLElement,
-	t: Translations,
-): ThrottleIndicatorHandle {
-	const el = root.createDiv({
-		cls: "transcribe-throttle-indicator is-hidden",
-		text: t.sidebar.throttleIndicator,
-	});
-	return {
-		setActive(active: boolean) {
-			el.toggleClass("is-hidden", !active);
-		},
-	};
-}

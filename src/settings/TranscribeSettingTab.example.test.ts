@@ -207,15 +207,13 @@ describe("TranscribeSettingTab.display — 렌더 예시", () => {
 			.filter((el) => el.dataset.heading === "true")
 			.map((el) => el.firstElementChild?.textContent ?? "");
 
-		// v1.1 정리 — Translation 섹션은 사이드바로 이전되어 헤딩에서 제거되었다.
-		// task 23 의 "Local model" 은 그대로 유지.
+		// v1.1 정리 — Translation/Local model 섹션은 제거되었다.
 		expect(headings).toEqual([
 			T.settings.awsHeading, // "AWS credentials"
 			T.settings.transcriptionHeading, // "Transcription"
-			"Local model", // task 23
 			T.settings.analysisHeading, // "Analysis"
 			T.settings.vocabularyHeading, // "Vocabulary"
-			T.settings.outputHeading, // "Output" — 화자 분리 토글은 사이드바로 이전, 타임스탬프만 남음
+			T.settings.outputHeading, // "Output"
 			T.settings.aboutHeading, // "About"
 		]);
 
@@ -327,136 +325,6 @@ describe("TranscribeSettingTab.display — 렌더 예시", () => {
 });
 
 // ===========================================================================
-// task 23 — Local model 섹션 통합 검증
-// ===========================================================================
-
-import { LOCAL_MODEL_CATALOG } from "../services/Local_Model_Catalog";
-
-/**
- * 본 describe 는 task 23 의 acceptance criterion 이 `TranscribeSettingTab` 통합
- * 흐름에서도 정상 동작하는지를 검증한다. 단위 검증은 별도
- * `LocalModelSettingsSection.example.test.ts` 가 담당하며, 본 describe 는
- * `buildLocalModelHost()` 와 `display()` 의 와이어링이 깨지지 않았음을 보증한다.
- *
- * - AC 1.2: Backend selection mode 드롭다운(3 옵션, 기본 `cloud-only`).
- * - AC 1.3: Local model 드롭다운(빈 값 + 카탈로그 항목 전체).
- * - AC 1.4: Model folder 절대 경로 거부 인라인 메시지.
- * - AC 1.5: 빈 modelFolder 로 진입하면 OS 기본값으로 prefill.
- * - AC 1.6: `local-only` 모드 + 누락 시 누락 항목명을 포함한 인라인 메시지.
- * - AC 2.1: Download model 버튼이 카탈로그/폴더 valid 시 활성화.
- */
-describe("TranscribeSettingTab — Local model 섹션 (task 23)", () => {
-	let app: App;
-	let plugin: TestPlugin;
-	let tab: TranscribeSettingTab;
-
-	beforeEach(() => {
-		app = new App();
-		plugin = new TestPlugin(app);
-		tab = new TranscribeSettingTab(app, plugin);
-		tab.display();
-	});
-
-	/**
-	 * 헤딩 위치를 기준으로 해당 섹션에 속한 후속 Setting 들을 다음 헤딩 직전까지 수집한다.
-	 * `Local model` 섹션의 자식 4 개(backend mode / model id / model folder / download)
-	 * 만 안전하게 가려내기 위함이다.
-	 */
-	function getSectionChildren(heading: string): HTMLElement[] {
-		const all = getSettingEls(tab.containerEl);
-		const start = all.findIndex(
-			(el) =>
-				el.dataset.heading === "true" &&
-				el.firstElementChild?.textContent === heading,
-		);
-		if (start < 0) return [];
-		const result: HTMLElement[] = [];
-		for (let i = start + 1; i < all.length; i++) {
-			if (all[i].dataset.heading === "true") break;
-			result.push(all[i]);
-		}
-		return result;
-	}
-
-	it("AC 1.2 — Backend selection mode 드롭다운이 3 옵션 + 기본 cloud-only", () => {
-		const [backendMode] = getSectionChildren("Local model");
-		expect(backendMode).toBeDefined();
-		const select = backendMode.querySelector("select") as HTMLSelectElement;
-		const optionValues = Array.from(select.options).map((o) => o.value);
-		expect(optionValues).toEqual(["cloud-only", "local-only", "auto"]);
-		expect(select.value).toBe("cloud-only");
-	});
-
-	it("AC 1.3 — Local model 드롭다운이 빈 값 + 카탈로그 전체를 노출한다", () => {
-		const [, localModel] = getSectionChildren("Local model");
-		const select = localModel.querySelector("select") as HTMLSelectElement;
-		const optionValues = Array.from(select.options).map((o) => o.value);
-		expect(optionValues[0]).toBe("");
-		for (const entry of LOCAL_MODEL_CATALOG) {
-			expect(optionValues).toContain(entry.id);
-		}
-		expect(optionValues.length).toBe(1 + LOCAL_MODEL_CATALOG.length);
-	});
-
-	it("AC 1.4 — Model folder 에 상대 경로 입력 시 인라인 에러가 표시된다", async () => {
-		const [, , modelFolder] = getSectionChildren("Local model");
-		const input = modelFolder.querySelector("input") as HTMLInputElement;
-		input.value = "relative/path";
-		input.dispatchEvent(new Event("input"));
-		await Promise.resolve();
-		await Promise.resolve();
-		const errorEl = modelFolder.querySelector(".transcribe-setting-error");
-		expect(errorEl).not.toBeNull();
-		expect(errorEl!.textContent ?? "").not.toBe("");
-	});
-
-	it("AC 1.5 — 빈 modelFolder 로 진입하면 OS 기본값으로 prefill 된다", () => {
-		// beforeEach 에서 `tab.display()` 가 이미 호출되었고, DEFAULT_SETTINGS.modelFolder
-		// 는 빈 문자열이므로 prefill 이 실행되어야 한다 (HOME 환경변수가 있는 일반 환경 기준).
-		// HOME 이 비어 있는 극단 환경에서는 빈 값이 그대로 유지될 수 있으므로 둘 다 허용한다.
-		const folder = plugin.settings.modelFolder;
-		const isPrefilledOrEmpty =
-			folder === "" || /obsidian-transcribe-plugin\/models$/.test(folder);
-		expect(isPrefilledOrEmpty).toBe(true);
-	});
-
-	it("AC 1.6 — local-only 로 변경 후 localModelId 가 비어 있으면 누락 메시지가 표시된다", () => {
-		// 비동기 onChange 흐름(saveIfValid → updateLocalRequirementsHint) 을 거치지 않고,
-		// 초기 렌더가 동기적으로 누락 메시지를 그리는지를 검증한다. plugin 을 새로 만들어
-		// `local-only` + 빈 localModelId 상태에서 display() 를 호출하면
-		// renderBackendSelectionModeDropdown 의 마지막 동기 호출이 hint 를 채운다.
-		const localPlugin = new TestPlugin(app);
-		localPlugin.settings.backendSelectionMode = "local-only";
-		localPlugin.settings.localModelId = "";
-		const localTab = new TranscribeSettingTab(app, localPlugin);
-		localTab.display();
-
-		const all = getSettingEls(localTab.containerEl);
-		const start = all.findIndex(
-			(el) =>
-				el.dataset.heading === "true" &&
-				el.firstElementChild?.textContent === "Local model",
-		);
-		expect(start).toBeGreaterThan(-1);
-		const backendMode = all[start + 1];
-
-		const errorEl = backendMode.querySelector(".transcribe-setting-error");
-		expect(errorEl).not.toBeNull();
-		// localModelId 는 빈 값이므로 누락 항목으로 표시되어야 한다.
-		expect(errorEl!.textContent ?? "").toContain("Local model");
-	});
-
-	it("AC 2.1 — Download model 버튼은 manager 미주입 시 disabled 이다", () => {
-		// TestPlugin 은 modelDownloadManager 를 노출하지 않으므로 host 의
-		// modelDownloadManager 가 undefined 가 되어 버튼은 항상 비활성이어야 한다.
-		const [, , , downloadCtl] = getSectionChildren("Local model");
-		const btn = downloadCtl.querySelector("button") as HTMLButtonElement;
-		expect(btn).not.toBeNull();
-		expect(btn.disabled).toBe(true);
-	});
-});
-
-// ===========================================================================
 // v1.1 정리 — 사이드바 인라인 미러 컨트롤 검증
 // ===========================================================================
 //
@@ -515,15 +383,6 @@ describe("SidebarInlineControls — task 24 미러 컨트롤", () => {
 			getCurrentTranslationOutputFormat: () =>
 				plugin.settings.translationOutputFormat,
 			setTranslationOutputFormat: plugin.setTranslationOutputFormat,
-			getCurrentBackendSelectionMode: () =>
-				plugin.settings.backendSelectionMode,
-			// task 33 — 사이드바 백엔드 드롭다운 + activeEngine 라벨에 사용되는 신규 stub.
-			setBackendSelectionMode: async (
-				mode: TranscribeSettings["backendSelectionMode"],
-			) => {
-				plugin.settings.backendSelectionMode = mode;
-			},
-			getCurrentLocalModelId: () => plugin.settings.localModelId,
 			// 마이크 선택 — 본 테스트군은 디바이스 동작을 검증하지 않으므로 no-op 스텁.
 			getCurrentAudioInputDeviceId: () => plugin.settings.audioInputDeviceId,
 			setAudioInputDeviceId: async (deviceId: string) => {

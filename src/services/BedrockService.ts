@@ -164,6 +164,60 @@ const PROMPT_BY_LOCALE: Record<SupportedLocale, string> = {
 };
 
 /**
+ * `refineTranscript` 의 시스템 프롬프트(locale 별).
+ *
+ * 핵심 제약 (사용자 결정 "맞춤법·띄어쓰기만"):
+ * - 단어 변경 / 요약 / 의역 / 추가 / 삭제 절대 금지.
+ * - `[mm:ss]` 또는 `[hh:mm:ss]` 타임스탬프 prefix 와 `Speaker N:` 라벨은 **그대로** 보존.
+ * - 라인 수 / 라인 순서 변경 금지 (라운드트립 호환을 위해).
+ * - 출력은 본문만 — 어떤 머리글, 설명, 코드펜스도 붙이지 말 것.
+ */
+const REFINE_SYSTEM_PROMPT_BY_LOCALE: Record<SupportedLocale, string> = {
+	en:
+		"You are a transcript proofreader. The user will give you a raw speech-to-text transcript. " +
+		"Your only job is to fix obvious spelling, spacing, and punctuation errors line by line.\n\n" +
+		"STRICT RULES (must obey):\n" +
+		"1. Do NOT change words. No paraphrasing, no summarizing, no translation, no synonym swaps.\n" +
+		"2. Do NOT add or remove content. The number of lines and the order of lines must stay identical.\n" +
+		"3. Preserve every `[mm:ss]` or `[hh:mm:ss]` timestamp prefix and every `Speaker N:` label exactly as given.\n" +
+		"4. Preserve any indented translation lines starting with two spaces and `→` exactly as given.\n" +
+		"5. Output ONLY the corrected transcript text. No headings, no explanation, no code fences.\n" +
+		"6. If a line is already clean, output it unchanged.",
+	ko:
+		"당신은 회의 전사(STT) 본문을 다듬는 교정자입니다. 사용자가 음성 인식 원문을 줄 것이고, " +
+		"당신은 라인별로 명백한 맞춤법 / 띄어쓰기 / 문장부호 오류만 바로잡습니다.\n\n" +
+		"엄격한 규칙(반드시 지킬 것):\n" +
+		"1. 단어를 바꾸지 마세요. 의역, 요약, 동의어 치환, 번역 금지.\n" +
+		"2. 내용을 추가하거나 삭제하지 마세요. 라인 수와 라인 순서는 입력과 완전히 동일해야 합니다.\n" +
+		"3. `[mm:ss]` 또는 `[hh:mm:ss]` 타임스탬프 prefix 와 `Speaker N:` 라벨은 입력 그대로 보존하세요.\n" +
+		"4. 두 칸 들여쓴 `  → ...` 형태의 번역 라인이 있다면 그대로 보존하세요.\n" +
+		"5. 결과는 교정된 전사 본문만 출력합니다. 머리글, 설명, 코드펜스 모두 붙이지 마세요.\n" +
+		"6. 이미 정상인 라인은 그대로 출력하세요.",
+};
+
+/**
+ * `RefineParams` — `BedrockService.refineTranscript` 매개변수.
+ *
+ * `AnalyzeParams` 와 거의 동일하지만 `glossary` 대신 `userInstruction` 을 받는다.
+ * `userInstruction` 은 사용자가 설정 UI 의 textarea 에 자유 입력한 추가 지시문이며,
+ * 비어 있으면 시스템 프롬프트만으로 교정을 수행한다.
+ */
+export interface RefineParams {
+	credentials: AwsCredentials;
+	region: string;
+	modelId: string;
+	/** 교정 대상 전사 본문(이미 `Sentence_Formatter.format` 으로 직렬화된 결과). */
+	transcript: string;
+	timeoutMs?: number;
+	locale: SupportedLocale;
+	/**
+	 * 사용자 자유 입력 지시문(선택). 예: "회사명 'Obsidian' 표기 유지". 비어 있으면 무시한다.
+	 * 시스템 프롬프트의 엄격 규칙(단어 변경 금지 등)은 이 값과 무관하게 항상 적용된다.
+	 */
+	userInstruction?: string;
+}
+
+/**
  * 주어진 locale 과 전사 본문(+ 선택적 용어 사전) 을 결합해 Claude 3 에 전달할 user 메시지를 구성한다.
  *
  * 구분선(`--- transcript start ---`, `--- transcript end ---`)은 모델이 지시문과
@@ -390,6 +444,128 @@ export class BedrockService {
 			);
 		} finally {
 			// 타임아웃 타이머가 아직 유효하다면 해제하여 이벤트 루프 보류를 막는다.
+			clearTimeout(timer);
+		}
+	}
+
+	/**
+	 * 이미 직렬화된 전사 본문을 Claude 모델로 **교정**한다 (맞춤법·띄어쓰기·문장부호만).
+	 *
+	 * `analyze` 와 동일한 InvokeModel 패턴을 따르지만, 본문을 요약하지 않고
+	 * 라인별 표면 표기만 다듬는다. 시스템 프롬프트가 단어 변경 / 의역 / 요약을
+	 * 금지하므로 사용자 자유 입력(`userInstruction`) 이 의역을 요청해도
+	 * 모델은 표면 표기 교정 범위를 벗어나지 않는다.
+	 *
+	 * 길이 제한(`MAX_TRANSCRIPT_LENGTH`), 타임아웃(`AbortController`),
+	 * 에러 분류(`AWS_AUTH` / `AWS_MODEL_UNAVAILABLE` / `AWS_NETWORK`) 정책은
+	 * `analyze` 와 동일하다.
+	 *
+	 * @returns 교정된 전사 본문 문자열. 모델이 빈 응답을 주면 빈 문자열.
+	 *          호출부는 빈 결과를 받으면 원본을 그대로 사용해야 한다.
+	 */
+	async refineTranscript(params: RefineParams): Promise<string> {
+		const {
+			credentials,
+			region,
+			modelId,
+			transcript,
+			timeoutMs = DEFAULT_TIMEOUT_MS,
+			locale,
+			userInstruction,
+		} = params;
+
+		if (transcript.length > MAX_TRANSCRIPT_LENGTH) {
+			throw new TranscribeError(
+				`Transcript length ${transcript.length} exceeds the ${MAX_TRANSCRIPT_LENGTH}-character limit.`,
+				"TRANSCRIPT_TOO_LONG",
+			);
+		}
+
+		const client = this.clientFactory(credentials, region);
+
+		const systemPrompt = REFINE_SYSTEM_PROMPT_BY_LOCALE[locale];
+		const trimmedInstruction = userInstruction?.trim() ?? "";
+		const userPrefix =
+			trimmedInstruction.length > 0
+				? `--- additional instructions ---\n${trimmedInstruction}\n--- end additional instructions ---\n\n`
+				: "";
+		const userMessage = `${userPrefix}--- transcript start ---\n${transcript}\n--- transcript end ---`;
+
+		const requestJson = JSON.stringify({
+			anthropic_version: ANTHROPIC_VERSION,
+			max_tokens: CLAUDE_MAX_TOKENS,
+			system: systemPrompt,
+			messages: [
+				{
+					role: "user",
+					content: userMessage,
+				},
+			],
+		});
+		const bodyBytes = new TextEncoder().encode(requestJson);
+
+		const command = new InvokeModelCommand({
+			modelId,
+			contentType: "application/json",
+			accept: "application/json",
+			body: bodyBytes,
+		});
+
+		const controller = new AbortController();
+		let timedOut = false;
+		const timer = setTimeout(() => {
+			timedOut = true;
+			controller.abort();
+		}, timeoutMs);
+
+		try {
+			const response = await client.send(command, {
+				abortSignal: controller.signal,
+			});
+			return extractClaudeText(response.body);
+		} catch (err) {
+			if (err instanceof TranscribeError) {
+				throw err;
+			}
+
+			if (isAbortError(err)) {
+				const reason = timedOut
+					? `Bedrock request timed out after ${timeoutMs} ms.`
+					: "Bedrock request was aborted.";
+				console.error("[BedrockService.refine] aborted:", reason);
+				throw new TranscribeError(reason, "AWS_NETWORK", err);
+			}
+
+			const name = getErrorName(err);
+
+			if (name === "AccessDeniedException" || name === "UnrecognizedClientException") {
+				console.error("[BedrockService.refine] auth error:", name);
+				throw new TranscribeError(
+					"Bedrock authentication failed.",
+					"AWS_AUTH",
+					err,
+				);
+			}
+
+			if (name === "ValidationException") {
+				console.error("[BedrockService.refine] model unavailable:", name);
+				throw new TranscribeError(
+					"Bedrock model is not available in the configured region.",
+					"AWS_MODEL_UNAVAILABLE",
+					err,
+				);
+			}
+
+			console.error(
+				"[BedrockService.refine] network/unknown error:",
+				name || "unknown",
+			);
+			throw new TranscribeError(
+				"Bedrock request failed.",
+				"AWS_NETWORK",
+				err,
+			);
+		} finally {
 			clearTimeout(timer);
 		}
 	}

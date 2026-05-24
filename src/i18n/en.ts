@@ -64,29 +64,14 @@ export const en = {
         refreshMicrophones: "Refresh microphones",
         // 권한 미부여 / 장치 enumerate 실패 시 라벨 fallback.
         microphoneUnknown: (idx: number): string => `Microphone ${idx}`,
-        // 백엔드 선택 컨트롤 (task 33) — 사이드바에서 클라우드/로컬/자동 모드를 즉시 전환.
-        backend: "Backend",
-        backendOptions: {
-            "cloud-only": "Cloud only",
-            "local-only": "Local only",
-            "auto": "Auto",
-        },
-        // 활성 전사 엔진 표시 라벨 (task 33). cloud 백엔드 시 "AWS Transcribe", local 백엔드 시
-        // "Hugging Face model (<localModelId>)" 형태로 노출된다.
-        activeEngine: "Active engine",
-        cloudEngineLabel: "AWS Transcribe",
-        localEngineLabel: (modelId: string): string =>
-            `Hugging Face model (${modelId.length > 0 ? modelId : "—"})`,
-        // 화자 분리/번역 컨트롤 라벨 — task 24 에서 도입, task 28 에서 톤 정렬.
+        // 화자 분리/번역 컨트롤 라벨.
         speaker: "Speaker labels",
         translation: "Translation",
         targetLanguage: "Translation language",
-        // 화자 분리 활성 시 사이드바 상단에 항상 노출되는 안내 라벨 (Requirement 6.8).
+        // 화자 분리 활성 시 사이드바 상단에 항상 노출되는 안내 라벨.
         speakerCapacityNotice:
             "Up to 10 simultaneous speakers can be identified",
-        // 청크 결과가 200ms 초과 지연될 때 표시되는 인디케이터 텍스트 (Requirement 10.2).
-        throttleIndicator: "Processing chunk...",
-        // 번역 활성 동안 status row 에 표시되는 누적 문자 수 prefix (Requirement 13.9).
+        // 번역 활성 동안 status row 에 표시되는 누적 문자 수 prefix.
         costCounter: (n: number): string => `Translated chars: ${n}`,
     },
     settings: {
@@ -150,46 +135,8 @@ export const en = {
         aboutNotice:
             "AWS credentials are stored in plain text at .obsidian/plugins/obsidian-transcribe-plugin/data.json. When you share or sync your vault, this file may be transferred together.",
 
-        // ─── v1.1 신규 (task 24) ───
-        // 본 섹션 키들은 task 28 (i18n 정리) 단계에서 정식 톤/이름으로 정렬되었다.
-
-        // Local model 섹션 — 백엔드 선택 / 로컬 모델 / 모델 폴더 (Requirement 1.1~1.6, task 23)
-        localModelHeading: "Local model",
-        backendSelectionMode: {
-            name: "Backend selection mode",
-            desc: "Choose how transcription is performed. Cloud uses AWS Transcribe; local runs Whisper on your device; auto tries cloud first and falls back to local when offline or credentials are missing.",
-            options: {
-                "cloud-only": "Cloud only",
-                "local-only": "Local only",
-                "auto": "Auto (cloud first, fallback to local)",
-            },
-        },
-        localModelId: {
-            name: "Local model",
-            desc: "Whisper model used for local transcription. Larger models give higher accuracy but require more memory and disk space.",
-            empty: "Not selected",
-            // 다운로드 버튼 라벨 — 설정 탭의 "Download model" 버튼과 옵션 표시명에서 공통 사용.
-            download: "Download model",
-            // 카탈로그 항목 1개의 표시명에 예상 크기를 함께 노출하기 위한 포매터.
-            // 예: "Whisper Small (~466 MB)" — 옵션 라벨/desc 양쪽에서 일관되게 사용.
-            sizeFormat: (sizeMb: number): string => `~${sizeMb} MB`,
-        },
-        modelFolder: {
-            name: "Model folder",
-            desc: "Absolute filesystem path where downloaded local models are stored. Leave empty to use the OS-specific default location.",
-            placeholder: "Absolute path (e.g. /Users/you/Library/Application Support/obsidian-transcribe-plugin/models)",
-        },
-        streamingDisplayMode: {
-            name: "Streaming display mode",
-            desc: "How local transcription results are surfaced. Progress only commits the full transcript when streaming stops; chunked streaming surfaces partial results every 30 seconds.",
-            options: {
-                "progress-only": "Progress only (commit at end)",
-                "chunked-streaming": "Chunked streaming (every 30s)",
-            },
-        },
-
-        // Output 섹션 — 문장 타임스탬프 (Requirement 5.1).
-        // 화자 분리 토글은 v1.1 정리에서 사이드바 인라인 컨트롤로 이전됨 (i18n: `sidebar.speaker`).
+        // Output 섹션 — 문장 타임스탬프.
+        // 화자 분리 토글은 사이드바 인라인 컨트롤로 이전됨 (i18n: `sidebar.speaker`).
         outputHeading: "Output",
         timestampOutput: {
             name: "Sentence timestamps",
@@ -206,6 +153,19 @@ export const en = {
                     inline: "Include below each line",
                     none: "Sidebar only (do not save)",
                 },
+            },
+        },
+        // AI 교정 섹션 — Bedrock 모델로 노트 저장 직전 본문 표면 표기를 다듬는다.
+        // 사용자 결정: "자동 + 원본 보존", "맞춤법·띄어쓰기만".
+        refine: {
+            enabled: {
+                name: "AI proofreading on save",
+                desc: "Run the analysis model right before saving to fix spelling, spacing, and punctuation only. The note keeps both the refined and the original transcript.",
+            },
+            instruction: {
+                name: "Proofreading instructions",
+                desc: "Optional free-text instructions appended to the proofreading prompt. The strict 'no word changes / no paraphrasing' rules always apply.",
+                placeholder: "e.g.\nKeep brand names like 'Obsidian' as written.\nUse formal Korean consistently.",
             },
         },
     },
@@ -257,72 +217,24 @@ export const en = {
         // 단일 세션 불변식 위반 방지 (Requirement 7.6)
         singleSessionActive: "A transcription session is already active.",
 
-        // ─── v1.1 신규 (task 28, design §Error Handling) ───
-        // 백엔드 / 모델 (Requirement 3.7 auto 폴백 사유, Requirement 4 로컬 모델 상태)
-        backendFallbackOffline:
-            "Auto fallback to local mode: device is offline.",
-        backendFallbackNoCredentials:
-            "Auto fallback to local mode: AWS credentials missing.",
-        backendFallbackTimeout:
-            "Auto fallback to local mode: AWS Transcribe timed out.",
-        backendFallbackAuth:
-            "Auto fallback to local mode: AWS authentication failed.",
-        // 네트워크 일반 오류로 인한 자동 폴백 — Auth/Timeout/Offline 어느 카테고리에도
-        // 정확히 들어맞지 않는 일반 네트워크 오류(DNS 실패, ECONNREFUSED 등) 시에 사용.
-        backendFallbackNetwork:
-            "Auto fallback to local mode: network error.",
-        localModelMissing: (modelId: string): string =>
-            `Local model "${modelId}" is not installed. Open settings to download it.`,
-        localModelCorrupted:
-            "Local model file is corrupted. Please re-download it.",
-        localSlowerThanRealtime:
-            "Local mode may transcribe slower than real-time.",
-        localSpeakerDiarizationUnsupported:
-            "Speaker diarization is not supported in local mode (v1).",
-        // 사이드바 안내 라벨 — 화자 분리 활성 시 노출 (Requirement 6.8). sidebar.speakerCapacityNotice 와
-        // 같은 문구이지만 Notice 토스트 경로에서도 사용할 수 있도록 별도 키로 둔다 (design §Error Handling).
+        // 사이드바 안내 라벨 — 화자 분리 활성 시 노출.
         speakerCapacityNotice:
             "Up to 10 simultaneous speakers can be identified.",
-        diskSpaceLowDuringDownload: (freeMb: number): string =>
-            `Free disk space below 100MB (${freeMb}MB). Download cancelled.`,
-        diskSpaceLowDuringInference: (freeMb: number): string =>
-            `Free disk space below 100MB (${freeMb}MB). Inference continues but please free up space.`,
 
-        // 다운로드 모달 (Requirement 2.1~2.3, 2.5, 2.9)
-        downloadConfirmTitle: "Download local model",
-        downloadConfirmDescription: (size: number, host: string): string =>
-            `This will download approximately ${size}MB from ${host}. Continue?`,
-        downloadConfirmAgree: "Agree and download",
-        downloadConfirmCancel: "Cancel",
-        downloadCancelled: "Download cancelled.",
-        downloadFailedNetwork: (status: number): string =>
-            `Download failed (HTTP ${status}). Check your network connection.`,
-        downloadFailedChecksum:
-            "Model integrity check failed. The file has been deleted.",
-        downloadFailedDisk:
-            "Disk write error during download. The file has been deleted.",
-
-        // 번역 (Requirement 13.6, 14.5)
+        // 번역 실패 메시지.
         translationFailedSingle: "(translation failed)",
         translationAutoDisabled:
             "Translation auto-disabled after repeated failures.",
 
-        // 모드 게이트 (Requirement 14.8)
-        // NOTE: 구 Requirement 13.8 의 `translationLocalNeedsNetwork` 는 v1.1 에서 제거되었고,
-        // 그 자리를 아래 `translationOfflineUnsupported` 가 대체한다.
-        translationOfflineUnsupported:
-            "Real-time translation is disabled in offline mode.",
-        analysisOfflineUnsupported:
-            "AI analysis is disabled in offline mode.",
-        // 사이드바 비활성 컨트롤 4종(번역 토글/대상 언어/화자 분리/분석 버튼) 공통 툴팁 (Requirement 14.2)
-        tooltipOnlineOnlyFeature: "Available in cloud mode only",
-        // 분석 버튼 단독 비활성 시 툴팁. 본 키는 `analysisOfflineUnsupported` 와 동일 문구를 재사용하지만,
-        // 호출 위치(분석 버튼 단독 vs 4종 일괄)를 구분 가능하도록 별도 키로 분리한다 (design §4.8, task 25).
-        tooltipAnalysisOfflineDisabled:
-            "AI analysis is disabled in offline mode.",
+        // AI 교정 실패 — 원본 그대로 저장됨을 알림.
+        refineFailed:
+            "AI proofreading failed. The original transcript was saved.",
     },
     // 분석 결과를 Transcript_Note에 부착할 때 사용하는 섹션 헤더 (Requirement 6.8)
     analysisHeader: "## Analysis result",
+    // AI 교정본 / 원본 두 섹션 헤더. 사용자 결정 "원본 보존" 정책으로 양쪽 모두 노트에 저장.
+    refinedHeader: "## Refined transcript",
+    originalHeader: "## Original transcript",
 };
 
 // 모든 로케일 파일이 준수해야 하는 번역 키 구조 타입.

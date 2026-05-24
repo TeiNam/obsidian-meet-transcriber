@@ -2,38 +2,27 @@
  * `TranscribeSettingTab` — Obsidian 설정 화면에 노출되는 플러그인 설정 탭.
  *
  * Obsidian `PluginSettingTab`을 확장하여 다음 섹션을 정해진 순서로 렌더링한다.
- *   1. UI Locale 드롭다운 (설정 탭의 **첫 항목**, Requirement 2.2)
+ *   1. UI Locale 드롭다운 (설정 탭의 첫 항목)
  *   2. AWS credentials 섹션: access key ID / secret access key(password) / AWS region
  *   3. Transcription 섹션: transcription language / transcript folder(FolderSuggest 연결)
- *   4. Local model 섹션 (task 23)
- *   5. Analysis 섹션: 분석 용어 사전 (glossary) — Bedrock 모델 ID 는 v1.1 정리에서
- *      사이드바 인라인 컨트롤로 이전됨
- *   6. Vocabulary 섹션: AWS Custom Vocabulary 자동 동기화
- *   7. Output 섹션: 문장 타임스탬프 토글 — 화자 분리 토글은 v1.1 정리에서 사이드바 이전됨
- *   8. About 섹션: 자격 증명 저장 위치 보안 고지 (Requirement 2.13)
+ *   4. Analysis 섹션: 분석 용어 사전 (glossary)
+ *   5. Vocabulary 섹션: AWS Custom Vocabulary 자동 동기화
+ *   6. Output 섹션: 문장 타임스탬프 토글
+ *   7. About 섹션: 자격 증명 저장 위치 보안 고지
  *
- * v1.1 정리 (2026-05) — 다음 5개 컨트롤이 본 탭에서 제거되어 사이드바 인라인
- * 컨트롤로 이전되었다: bedrockModelId, speakerDiarization, translationEnabled,
- * translationTargetLanguage, translationOutputFormat. 저장 키와 `mergeWithDefaults`
- * 화이트리스트는 그대로 유지된다 (회귀 게이트 보호).
- *
- * 설계 원칙(Requirements 2.1, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 2.10, 2.13, 2.16):
- * - 섹션 헤더는 `setHeading()` 패턴만 사용한다. `createEl("h2")`는 심사 거부 사유이므로 금지한다.
+ * 설계 원칙:
+ * - 섹션 헤더는 `setHeading()` 패턴만 사용한다.
  * - 모든 레이블은 Sentence case로 작성하며, 문자열은 i18n(`plugin.t`)에서만 가져온다.
  * - access key ID / secret key는 HTML `maxlength` + 런타임 검증으로 길이 초과를 방지한다.
  * - 길이 초과 입력이 감지되면 해당 필드 아래에 인라인 에러 메시지를 표시하고
  *   `settingsStore.save()`를 호출하지 않아 부적합한 상태가 영속화되지 않도록 한다.
- *   (요구사항 2.16의 "저장 버튼 비활성화"는 Obsidian Setting 패턴상 별도 save 버튼이 없으므로,
- *    "유효하지 않으면 저장을 실행하지 않는다"는 불변식으로 해석·구현한다.)
  * - UI Locale 변경 시: 설정 저장 → `plugin.changeLocale(locale)` 호출 → `display()` 재호출하여
- *   설정 탭 전체를 새 언어로 다시 렌더링한다 (Requirement 2.3).
- *
- * 관련 설계: design.md § 9 "SettingsStore & TranscribeSettingTab & FolderSuggest"
+ *   설정 탭 전체를 새 언어로 다시 렌더링한다.
  */
 
 import {
-	type App,
 	Notice,
+	type App,
 	type Plugin,
 	PluginSettingTab,
 	Setting,
@@ -45,16 +34,10 @@ import type {
 	SupportedLocale,
 	TranscribeSettings,
 } from "../types/settings";
-import type { Local_Model_Installation_Record } from "../types/localModel";
 
-import type { Model_Download_Manager } from "../services/Model_Download_Manager";
 import { VocabularyManager } from "../services/VocabularyManager";
 import { TranscribeError } from "../types/errors";
 import { FolderSuggest } from "./FolderSuggest";
-import {
-	renderLocalModelSection,
-	type LocalModelSectionHost,
-} from "./LocalModelSettingsSection";
 import type { SettingsStore } from "./SettingsStore";
 
 /**
@@ -76,11 +59,9 @@ export interface TranscribePluginLike extends Plugin {
 	t: Translations;
 	changeLocale(locale: SupportedLocale): Promise<void>;
 	/**
-	 * v1.1 신규 — 화자 분리 / 번역 토글의 양방향 미러 동기화용 setter.
+	 * 화자 분리 / 번역 토글의 양방향 미러 동기화용 setter.
 	 *
 	 * 설정 탭과 사이드바 인라인 컨트롤이 모두 본 메서드를 통해 값을 변경한다.
-	 * plugin 구현은 saveData + 열린 설정 탭 재렌더 + 열린 사이드바 재렌더를
-	 * 단일 경로로 처리하여 두 위치의 값을 항상 일치시킨다 (Requirement 6.2, 13.2).
 	 */
 	setSpeakerDiarizationEnabled(enabled: boolean): Promise<void>;
 	setTranslationEnabled(enabled: boolean): Promise<void>;
@@ -90,31 +71,6 @@ export interface TranscribePluginLike extends Plugin {
 	setTranslationOutputFormat(
 		format: TranscribeSettings["translationOutputFormat"],
 	): Promise<void>;
-	/**
-	 * 로컬 Whisper 모델 다운로드 매니저(선택).
-	 *
-	 * 본 task 23 시점에는 plugin 측 구현이 아직 없을 수 있으므로 optional 로 둔다.
-	 * 값이 `undefined` 이면 "Download model" 버튼은 항상 비활성 상태로 렌더링된다.
-	 *
-	 * 주입 패턴: lazy getter 로 구현해도 되고(`get modelDownloadManager()`), 단순 필드로
-	 * 두어도 된다 — 본 인터페이스는 구조적 타입이라 양쪽 모두 호환된다.
-	 */
-	modelDownloadManager?: Model_Download_Manager;
-	/**
-	 * 다운로드 완료 시 plugin 측 책임으로 `localModelInstalled` data.json 키를
-	 * 갱신하기 위한 콜백(선택). plugin 이 다운로드 완료를 영속화할 때 호출된다.
-	 *
-	 * 본 task 23 에서는 인터페이스만 결정하고, 실제 영속화 와이어링은 plugin 측 task 에서 수행한다.
-	 */
-	onLocalModelDownloaded?(record: Local_Model_Installation_Record): void;
-	/**
-	 * 모델 폴더 prefill 에 사용할 기본 경로 (task 33).
-	 *
-	 * Obsidian 데스크톱 환경에서는 vault 루트의 `Attached Files` 절대 경로를 우선
-	 * 반환하고, vault adapter 가 basePath 헬퍼를 제공하지 않거나 빈 문자열일 경우
-	 * OS 별 기본 경로(`computeDefaultModelFolder()`) 로 fallback 한다.
-	 */
-	getDefaultModelFolder?(): string;
 }
 
 /**
@@ -214,65 +170,31 @@ export class TranscribeSettingTab extends PluginSettingTab {
 		this.renderLanguageCodeDropdown(containerEl, t);
 		this.renderTranscriptFolderField(containerEl, t);
 
-		// (3.5) Local model 섹션 (task 23 — Requirement 1.1~1.6, 2.1, 4.7)
-		new Setting(containerEl)
-			.setName(t.settings.localModelHeading)
-			.setHeading();
-		renderLocalModelSection(containerEl, this.buildLocalModelHost());
-
-		// (4) Analysis 섹션 — Bedrock 모델 ID 는 v1.1 정리에서 사이드바 전용으로
-		// 이전되었고, 본 섹션에는 분석 추가 지시(glossary) 항목만 남는다.
+		// (4) Analysis 섹션 — 분석 추가 지시(glossary) 항목.
 		new Setting(containerEl)
 			.setName(t.settings.analysisHeading)
 			.setHeading();
 		this.renderAnalysisGlossaryField(containerEl, t);
 
-		// (5) Vocabulary 섹션 (A) — Transcribe 커스텀 어휘 이름
+		// (5) Vocabulary 섹션 — Transcribe 커스텀 어휘 이름.
 		new Setting(containerEl)
 			.setName(t.settings.vocabularyHeading)
 			.setHeading();
 		this.renderTranscribeVocabularyNameField(containerEl, t);
 
-		// (6) Output 섹션 — 문장 타임스탬프 (Requirement 5.1).
-		// 화자 분리 토글은 v1.1 정리에서 사이드바 전용으로 이전되었다.
+		// (6) Output 섹션 — 문장 타임스탬프 + AI 교정.
 		new Setting(containerEl)
 			.setName(t.settings.outputHeading)
 			.setHeading();
 		this.renderTimestampOutputToggle(containerEl, t);
+		this.renderRefineEnabledToggle(containerEl, t);
+		this.renderRefinementInstructionField(containerEl, t);
 
-		// (7) Translation 섹션 — v1.1 정리에서 토글/대상 언어/출력 형식 모두
-		// 사이드바 인라인 컨트롤로 이전되어 본 섹션은 더 이상 렌더하지 않는다.
-
-		// (8) About 섹션 — 자격 증명 저장 위치 보안 고지 (Requirement 2.13)
+		// (7) About 섹션 — 자격 증명 저장 위치 보안 고지.
 		new Setting(containerEl)
 			.setName(t.settings.aboutHeading)
 			.setHeading();
 		new Setting(containerEl).setDesc(t.settings.aboutNotice);
-	}
-
-	/**
-	 * Local model 섹션 렌더러에 전달할 호스트 객체를 구성한다 (task 23).
-	 *
-	 * `LocalModelSectionHost` 의 `saveIfValid` 는 본 클래스의 동명 private 메서드를 그대로
-	 * 위임 호출한다. plugin 의 다운로드 매니저와 완료 콜백은 optional 이므로 plugin 측에서
-	 * 주입되어 있으면 그대로 전달, 없으면 undefined.
-	 */
-	private buildLocalModelHost(): LocalModelSectionHost {
-		const plugin = this.transcribePlugin;
-		return {
-			app: this.app,
-			settings: plugin.settings,
-			t: plugin.t,
-			modelDownloadManager: plugin.modelDownloadManager,
-			onLocalModelDownloaded: plugin.onLocalModelDownloaded?.bind(plugin),
-			saveIfValid: () => this.saveIfValid(),
-			// task 33 — plugin 이 vault 루트 기반 기본 경로(`<vault>/Attached Files`) 를
-			// 알면 LocalModelSettingsSection 가 OS 기본 경로 대신 그 값을 prefill 한다.
-			getDefaultModelFolder:
-				typeof plugin.getDefaultModelFolder === "function"
-					? () => plugin.getDefaultModelFolder!()
-					: undefined,
-		};
 	}
 
 	// ---------------------------------------------------------------------
@@ -695,6 +617,54 @@ export class TranscribeSettingTab extends PluginSettingTab {
 				tg.setValue(this.transcribePlugin.settings.timestampOutputEnabled);
 				tg.onChange(async (value) => {
 					this.transcribePlugin.settings.timestampOutputEnabled = value;
+					await this.saveIfValid();
+				});
+			});
+	}
+
+	/**
+	 * AI 교정 활성 토글.
+	 *
+	 * `true` 면 `saveBufferAsTranscript` 가 노트 저장 직전에 `BedrockService.refineTranscript`
+	 * 를 호출하여 본문의 맞춤법·띄어쓰기·문장부호만 교정한다. 노트에는 교정본과 원본이
+	 * 두 섹션으로 모두 기록된다(원본 보존 정책).
+	 */
+	private renderRefineEnabledToggle(
+		containerEl: HTMLElement,
+		t: Translations,
+	): void {
+		new Setting(containerEl)
+			.setName(t.settings.refine.enabled.name)
+			.setDesc(t.settings.refine.enabled.desc)
+			.addToggle((tg) => {
+				tg.setValue(this.transcribePlugin.settings.refineEnabled);
+				tg.onChange(async (value) => {
+					this.transcribePlugin.settings.refineEnabled = value;
+					await this.saveIfValid();
+				});
+			});
+	}
+
+	/**
+	 * AI 교정 자유 입력 지시문(textarea).
+	 *
+	 * 시스템 프롬프트의 엄격 규칙은 사용자 입력과 무관하게 항상 적용되므로
+	 * 사용자가 의역/요약 지시를 적어도 모델은 표면 표기 교정 범위를 벗어나지 않는다.
+	 */
+	private renderRefinementInstructionField(
+		containerEl: HTMLElement,
+		t: Translations,
+	): void {
+		new Setting(containerEl)
+			.setName(t.settings.refine.instruction.name)
+			.setDesc(t.settings.refine.instruction.desc)
+			.addTextArea((ta) => {
+				ta.inputEl.rows = 4;
+				ta.inputEl.classList.add("transcribe-glossary-textarea");
+				ta.setPlaceholder(t.settings.refine.instruction.placeholder);
+				ta.setValue(this.transcribePlugin.settings.refinementInstruction);
+				ta.onChange(async (value) => {
+					this.transcribePlugin.settings.refinementInstruction = value;
 					await this.saveIfValid();
 				});
 			});

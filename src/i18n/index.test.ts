@@ -240,21 +240,4 @@ describe("task 28 — i18n 키 셋 정합성", () => {
 		expect("translationLocalNeedsNetwork" in ko.notices).toBe(false);
 	});
 
-	it("v1.1 신규 모드 게이트 키 4종이 두 로케일 모두에 존재한다", () => {
-		// Requirement 14.8 에 정의된 신규 키들의 존재를 양 로케일에서 명시 검증.
-		// 컴파일 타임 누락 검출 외에, 키 이름의 회귀(rename 등) 도 잡는다.
-		const requiredKeys = [
-			"translationOfflineUnsupported",
-			"analysisOfflineUnsupported",
-			"tooltipOnlineOnlyFeature",
-			"tooltipAnalysisOfflineDisabled",
-		] as const;
-
-		for (const key of requiredKeys) {
-			expect(en.notices[key]).toBeDefined();
-			expect(typeof en.notices[key]).toBe("string");
-			expect(ko.notices[key]).toBeDefined();
-			expect(typeof ko.notices[key]).toBe("string");
-		}
-	});
 });

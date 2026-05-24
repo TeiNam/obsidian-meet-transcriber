@@ -262,6 +262,21 @@
     font-style: italic;
 }
 
+/* Final 라인 단위 렌더 — 타임스탬프/화자 분리/번역 활성 시 사용 */
+.transcript-text .line {
+    display: block;
+    margin-bottom: var(--size-2-1);
+}
+
+.transcript-text .timestamp-label {
+    color: var(--text-faint);
+    margin-right: 0.25em;
+}
+
+.transcript-text .line-text {
+    color: var(--text-normal);
+}
+
 /* 빈 상태 — 안내 문구가 들어가는 경우 뮤트 */
 .transcript-text.is-empty {
     color: var(--text-muted);

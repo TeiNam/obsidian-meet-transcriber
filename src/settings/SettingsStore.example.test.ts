@@ -107,16 +107,13 @@ describe("SettingsStore.load — 기본값 머지 (Requirement 2.11)", () => {
 			vocabularyPhrases: "",
 			analysisGlossary: "",
 			audioInputDeviceId: "",
-			// v1.1 신규 필드 — DEFAULT_SETTINGS의 비활성 측 값과 동일.
-			backendSelectionMode: "cloud-only",
-			localModelId: "",
-			modelFolder: "",
-			streamingDisplayMode: "chunked-streaming",
 			timestampOutputEnabled: false,
 			speakerDiarizationEnabled: false,
 			translationEnabled: false,
 			translationTargetLanguage: "en",
 			translationOutputFormat: "inline",
+			refineEnabled: false,
+			refinementInstruction: "",
 		};
 		fakePlugin.loadData.mockResolvedValue(saved);
 
@@ -165,16 +162,13 @@ describe("SettingsStore.save — 저장 위임 및 에러 전파 (Requirement 2.
 		vocabularyPhrases: "",
 		analysisGlossary: "",
 		audioInputDeviceId: "",
-		// v1.1 신규 필드 — DEFAULT_SETTINGS의 비활성 측 값과 동일.
-		backendSelectionMode: "cloud-only",
-		localModelId: "",
-		modelFolder: "",
-		streamingDisplayMode: "chunked-streaming",
 		timestampOutputEnabled: false,
 		speakerDiarizationEnabled: false,
 		translationEnabled: false,
 		translationTargetLanguage: "en",
 		translationOutputFormat: "inline",
+		refineEnabled: false,
+		refinementInstruction: "",
 	};
 
 	beforeEach(() => {

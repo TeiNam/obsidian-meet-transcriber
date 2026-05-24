@@ -363,8 +363,8 @@ describe('Sentence_Formatter.format — AC 13.7: translationOutputFormat="none" 
 	});
 });
 
-describe("Sentence_Formatter.format — AC 13.7: timestamp off 시 통짜 본문 우선 (번역 미포함)", () => {
-	test("timestampOutputEnabled=false 이면 translationOutputFormat='inline' 이고 translatedText 가 있어도 v1.0 통짜 본문만 출력한다", () => {
+describe("Sentence_Formatter.format — AC 13.7: timestamp off + inline 번역 → prefix 없이 segment 단위 줄바꿈", () => {
+	test("timestampOutputEnabled=false 이고 translationOutputFormat='inline' 이면 [mm:ss] prefix 없이 본문/번역 라인이 segment 단위로 출력된다", () => {
 		const segments: Translated_Segment[] = [
 			{
 				segmentId: 1,
@@ -391,11 +391,31 @@ describe("Sentence_Formatter.format — AC 13.7: timestamp off 시 통짜 본문
 
 		const result = format(segments, opts);
 
-		// v1.0 통짜 본문: segments.map(s => s.text).join(" ") + "\n".
-		expect(result).toBe("안녕하세요. 반갑습니다.\n");
-		// 번역 텍스트와 타임스탬프 prefix 가 모두 누락되어야 한다.
-		expect(result).not.toContain("Hello");
-		expect(result).not.toContain("Nice to meet");
+		// v1.2: 통짜 본문 분기 제거. 항상 segment 단위 줄바꿈.
+		expect(result).toBe(
+			"안녕하세요.\n" +
+				"  → Hello.\n" +
+				"반갑습니다.\n" +
+				"  → Nice to meet you.\n",
+		);
+		// 타임스탬프 prefix 는 부착되지 않는다.
+		expect(result).not.toContain("[00:");
+	});
+
+	test("timestampOutputEnabled=false 이고 translationOutputFormat='none' 이면 prefix·번역 없이 본문 라인만 출력된다", () => {
+		const segments: Transcript_Segment[] = [
+			{ segmentId: 1, startSeconds: 12, endSeconds: 12, text: "안녕하세요." },
+			{ segmentId: 2, startSeconds: 18, endSeconds: 18, text: "반갑습니다." },
+		];
+		const opts: FormatOptions = {
+			speakerDiarizationEnabled: false,
+			timestampOutputEnabled: false,
+			translationOutputFormat: "none",
+		};
+
+		const result = format(segments, opts);
+
+		expect(result).toBe("안녕하세요.\n반갑습니다.\n");
 		expect(result).not.toContain("[00:");
 		expect(result).not.toContain("  → ");
 	});

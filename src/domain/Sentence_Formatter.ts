@@ -94,10 +94,14 @@ import type { Translation_Output_Format } from "../types/settings";
 /**
  * `format` 함수의 옵션. design §Sentence_Formatter `FormatOptions` 와 1:1 일치.
  *
+ * v1.2 정리: 출력은 항상 segment 단위로 줄바꿈된다. `timestampOutputEnabled` 는
+ * 이제 `[mm:ss] ` prefix 의 부착 여부만 토글하며, 통짜 본문(blob-join) 분기는 제거되었다.
+ *
  * - `speakerDiarizationEnabled`: `true` 이고 segment 에 `speakerLabel` 이 존재하면
- *   라인 prefix 가 `"[mm:ss] Speaker N: text"` 형태가 된다 (Requirement 5.5).
- * - `timestampOutputEnabled`: `false` 면 v1.0 통짜 본문 분기로 `segments.map(s => s.text).join(" ")`
- *   + 단일 trailing newline 을 반환한다 (Requirement 5.1, 8.2).
+ *   라인 prefix 가 `"Speaker N: text"` (또는 timestamp 와 결합 시
+ *   `"[mm:ss] Speaker N: text"`) 형태가 된다 (Requirement 5.5).
+ * - `timestampOutputEnabled`: `true` 면 모든 라인 앞에 `[mm:ss] ` 를 붙인다
+ *   (1 시간 이상 입력은 `[hh:mm:ss] `). `false` 면 prefix 를 붙이지 않는다 (Requirement 5.4).
  * - `translationOutputFormat`: `"inline"` 이고 segment 가 `Translated_Segment` 이며
  *   `translatedText` 가 정의되어 있으면 라인 바로 아래 두 칸 들여쓴 `"  → translated"`
  *   라인을 추가한다 (Requirement 13.7).
@@ -134,23 +138,27 @@ const TRANSLATION_LINE_PREFIX = "  → ";
  * `Transcript_Segment` 또는 `Translated_Segment` 시퀀스를 단일 문자열로 직렬화한다
  * (design §Sentence_Formatter `format` 의사코드 + Requirement 5.1, 5.5, 5.6, 5.10, 13.7).
  *
- * 동작 분기:
- * - `options.timestampOutputEnabled === false`:
- *   v1.0 호환 통짜 본문 (`segments.map(s => s.text).join(" ")`). 결과가 trim 후
- *   비공백이면 단일 trailing newline 을 부착하고, 그렇지 않으면 빈 문자열을 반환한다
- *   (Requirement 5.7, 8.2).
- * - `options.timestampOutputEnabled === true`:
- *   각 segment 를 `splitIntoSentences` 로 분할 후 라인별로 직렬화한다.
- *   - 형식: `"[mm:ss] text"` 또는 1 시간 이상은 `"[hh:mm:ss] text"` (Requirement 5.4).
- *   - `options.speakerDiarizationEnabled === true` 이고 segment 에 `speakerLabel` 이
- *     존재하면 형식이 `"[mm:ss] Speaker N: text"` 가 된다 (Requirement 5.5).
- *   - `seg.startSeconds < prevStart` (단조 증가 위반) 인 segment 는 출력에서
- *     제외하고 `console.error` 로 기록한다 (Requirement 5.10).
- *   - `options.translationOutputFormat === "inline"` 이고 segment 가
- *     `Translated_Segment` 이며 `translatedText` 가 정의되면, 매 sentence 라인
- *     바로 아래에 `"  → translated"` 두 번째 라인을 추가한다 (Requirement 13.7).
- *   - 최종 결과는 라인을 `"\n"` 으로 join 후 단일 trailing newline 부착.
- *     입력이 모두 공백이거나 빈 배열인 경우 빈 문자열 반환 (Requirement 5.7).
+ * v1.2 정리: 통짜 본문(blob-join) 분기는 제거되었다.
+ * v1.2.1: 줄바꿈 단위가 segment 가 아닌 **문장**(종결부호) 기준으로 변경되었다.
+ * AWS Transcribe 가 짧은 chunk 단위로 Final_Result 를 흩뿌리면 라인이 잘게 쪼개져
+ * 가독성이 떨어지므로, segment 텍스트를 누적해서 종결부호를 만날 때만 라인을 emit 한다.
+ *
+ * 동작:
+ * - segment 들의 text 를 누적해서 종결부호(`.` `!` `?` `。`)에 도달할 때마다 한 라인으로 emit.
+ *   라인의 timestamp / speakerLabel 은 라인 시작 segment 의 값을 사용한다.
+ * - 화자(speakerLabel) 가 바뀌면 누적된 미완성분을 강제 flush 한다.
+ * - inline 번역 활성 (`translationOutputFormat === "inline"` 이고 segment 가
+ *   `Translated_Segment` 이며 `translatedText` 정의됨) 시에는 placeholder 매칭이
+ *   깨지지 않도록 segment 경계에서 flush 한다 (Requirement 13.7).
+ * - 모든 segment 처리 후 종결부호 없이 남은 꼬리는 마지막 라인으로 보존한다.
+ * - `options.timestampOutputEnabled === true` 면 라인 앞에 `[mm:ss] ` 또는
+ *   `[hh:mm:ss] ` 를 부착한다 (Requirement 5.4).
+ * - `options.speakerDiarizationEnabled === true` 이고 라인에 화자 라벨이 있으면
+ *   본문 앞에 `Speaker N: ` 를 부착한다 (Requirement 5.5).
+ * - `seg.startSeconds < prevStart` (단조 증가 위반) 인 segment 는 timestamp 출력
+ *   모드에서만 검사·드롭한다 (Requirement 5.10).
+ * - 최종 결과는 라인을 `"\n"` 으로 join 후 단일 trailing newline 부착. 입력이 모두
+ *   공백이거나 빈 배열인 경우 빈 문자열 반환 (Requirement 5.7).
  *
  * 본 함수는 외부 I/O 에 의존하지 않으며 (Requirement 7.5, 12.1), 동일 입력에 대해
  * 항상 동일 출력을 반환한다 (결정성, Property 8).
@@ -159,19 +167,44 @@ export function format(
 	segments: ReadonlyArray<Transcript_Segment | Translated_Segment>,
 	options: FormatOptions,
 ): string {
-	if (!options.timestampOutputEnabled) {
-		// v1.0 통짜 본문 호환 분기 (Requirement 5.1 후반부, 8.2).
-		// 모든 text 가 공백이면 빈 문자열을 반환해 Requirement 5.7 을 만족한다.
-		const joined = segments.map((s) => s.text).join(" ");
-		return joined.trim().length > 0 ? `${joined}\n` : "";
-	}
-
 	const lines: string[] = [];
+
+	const inlineTranslation = options.translationOutputFormat === "inline";
+
+	// 누적기 상태 — 라인 시작 segment 의 메타데이터 + 누적 본문.
+	let accStart: number | null = null;
+	let accSpeaker: string | undefined;
+	let accBuf = "";
 	let prevStart = -Infinity;
 
+	const renderLine = (
+		startSeconds: number,
+		speakerLabel: string | undefined,
+		body: string,
+	): void => {
+		const trimmed = body.trim();
+		if (trimmed.length === 0) return;
+		const tsPrefix = options.timestampOutputEnabled
+			? `${formatTimestamp(startSeconds)} `
+			: "";
+		const speakerPrefix =
+			options.speakerDiarizationEnabled && speakerLabel
+				? `${speakerLabel}: `
+				: "";
+		lines.push(`${tsPrefix}${speakerPrefix}${trimmed}`);
+	};
+
+	const flushPending = (): void => {
+		if (accStart === null) return;
+		renderLine(accStart, accSpeaker, accBuf);
+		accStart = null;
+		accSpeaker = undefined;
+		accBuf = "";
+	};
+
 	for (const seg of segments) {
-		// 단조 증가 위반 방어 (Requirement 5.10).
-		if (seg.startSeconds < prevStart) {
+		// 단조 증가 위반 방어 (Requirement 5.10). timestamp 출력 시에만 의미가 있다.
+		if (options.timestampOutputEnabled && seg.startSeconds < prevStart) {
 			console.error(
 				"[Sentence_Formatter] non-monotonic segment dropped",
 				seg.segmentId,
@@ -180,28 +213,70 @@ export function format(
 		}
 		prevStart = seg.startSeconds;
 
-		const sentences = splitIntoSentences(seg.text);
-		for (const sentence of sentences) {
-			const ts = formatTimestamp(seg.startSeconds);
-			const speakerPrefix =
-				options.speakerDiarizationEnabled && seg.speakerLabel
-					? `${seg.speakerLabel}: `
-					: "";
-			lines.push(`${ts} ${speakerPrefix}${sentence}`);
+		// 화자 전환 시 강제 flush — 다른 화자의 말이 한 라인에 섞이지 않도록.
+		if (accStart !== null && seg.speakerLabel !== accSpeaker) {
+			flushPending();
+		}
 
-			// `Translated_Segment` 의 inline 직렬화 (Requirement 13.7).
-			// `Transcript_Segment` 만 들어오는 경우 `translatedText` 키가 부재하므로 분기를 건너뛴다.
-			if (
-				options.translationOutputFormat === "inline" &&
-				"translatedText" in seg &&
-				(seg as Translated_Segment).translatedText !== undefined
-			) {
-				lines.push(
-					`${TRANSLATION_LINE_PREFIX}${(seg as Translated_Segment).translatedText}`,
-				);
+		// 누적 시작 (라인의 timestamp / speaker 메타데이터 결정).
+		if (accStart === null) {
+			accStart = seg.startSeconds;
+			accSpeaker = seg.speakerLabel;
+		}
+
+		// segment text 를 누적기에 추가. 직전 누적분과 공백 1 칸으로 join 하여
+		// "안녕하세요" + "반갑습니다" → "안녕하세요 반갑습니다" 형태로 자연스럽게 연결.
+		const incoming = seg.text;
+		if (accBuf.length > 0 && incoming.length > 0) {
+			accBuf = `${accBuf} ${incoming}`;
+		} else {
+			accBuf = `${accBuf}${incoming}`;
+		}
+
+		// 누적된 본문에서 종결부호 단위로 라인을 잘라낸다. 종결부호 없이 남은
+		// 꼬리는 다음 segment 와 합쳐지도록 누적기에 그대로 둔다.
+		const sentences = splitIntoSentences(accBuf);
+		const lastChar = accBuf.trim().slice(-1);
+		const endsWithTerminator =
+			lastChar === "." ||
+			lastChar === "!" ||
+			lastChar === "?" ||
+			lastChar === "。";
+
+		if (sentences.length === 0) {
+			// 모두 공백 — 누적기 그대로 유지.
+		} else if (endsWithTerminator) {
+			// 모든 누적분이 종결부호로 깔끔히 닫힘. 라인으로 emit 후 누적기 초기화.
+			for (const sentence of sentences) {
+				renderLine(accStart, accSpeaker, sentence);
 			}
+			accStart = null;
+			accSpeaker = undefined;
+			accBuf = "";
+		} else {
+			// 마지막 문장은 종결부호 없는 꼬리 — 누적기에 남겨 둔다.
+			for (let i = 0; i < sentences.length - 1; i += 1) {
+				renderLine(accStart, accSpeaker, sentences[i]);
+			}
+			accBuf = sentences[sentences.length - 1];
+			// timestamp / speaker 메타는 라인 시작 segment 의 것 유지.
+		}
+
+		// inline 번역 활성 시에는 placeholder 매칭 보장을 위해 segment 경계에서 flush.
+		if (
+			inlineTranslation &&
+			"translatedText" in seg &&
+			(seg as Translated_Segment).translatedText !== undefined
+		) {
+			flushPending();
+			lines.push(
+				`${TRANSLATION_LINE_PREFIX}${(seg as Translated_Segment).translatedText}`,
+			);
 		}
 	}
+
+	// 종결부호 없이 끝난 꼬리도 보존.
+	flushPending();
 
 	return lines.length > 0 ? `${lines.join("\n")}\n` : "";
 }
