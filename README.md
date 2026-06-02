@@ -168,6 +168,10 @@ Transcribe Streaming 과 Bedrock 이 **동일 리전에서 모두 지원**되는
 7. **Edit** 버튼으로 오탈자를 교정하거나, **Analyze** 버튼으로 Bedrock 분석 결과(요약, 키워드, 결정사항, 액션 아이템, 참고사항 섹션의 회의록 형식)를 노트 끝에 추가합니다.
 8. 하단 **최근 전사** 리스트에서 이전 노트를 클릭하면 즉시 로드되어 편집·복사·분석이 가능합니다.
 
+### 온라인 회의 상대방 목소리 전사 (macOS)
+
+기본적으로는 내 마이크 입력만 전사됩니다. 화상 회의에서 **상대방 목소리까지 함께** 전사하려면 BlackHole 같은 가상 오디오 장치로 시스템 출력을 입력으로 되돌린 뒤, 플러그인 마이크 드롭다운에서 해당 장치를 선택하면 됩니다. 자세한 설정은 [온라인 회의 시스템 오디오 캡처 가이드](./docs/capture-system-audio-macos.md)를 참고하세요.
+
 ### 화자 분리(Speaker Diarization)
 
 화자 분리(`Speaker_Diarization_Enabled = true`) 는 AWS Transcribe 의 `ShowSpeakerLabel` 옵션을 통해 제공되며, 사이드바 토글로 켜고 끌 수 있습니다.
@@ -361,6 +365,10 @@ Configure the following under `Settings → Community plugins → Transcribe →
 6. Drag-select text on the transcript board, or click the 📋 icon in the top-right corner to copy all.
 7. Use **Edit** to correct errors, or **Analyze** to append Bedrock-generated meeting minutes (Summary, Keywords, Decisions, Action items, and Notes sections).
 8. Click any item in the **Recent transcripts** list at the bottom to instantly load a previous note for editing, copying, or analysis.
+
+### Transcribing other participants' audio (macOS)
+
+By default only your microphone input is transcribed. To also transcribe **the other participants' voices** in a video call, route your system output back as an input using a virtual audio device like BlackHole, then select that device in the plugin's microphone dropdown. See the [macOS system audio capture guide](./docs/capture-system-audio-macos.md) for full setup steps.
 
 ### Speaker diarization
 

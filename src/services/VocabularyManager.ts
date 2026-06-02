@@ -47,6 +47,38 @@ const POLL_INTERVAL_MS = 3_000;
 /** 폴링 최대 대기 시간(ms). */
 const POLL_TIMEOUT_MS = 60_000;
 
+/**
+ * 사용자가 입력한 여러 줄 단어 목록을 AWS Transcribe Custom Vocabulary 의
+ * `Phrases` 형식으로 정규화한다.
+ *
+ * AWS 규칙: 한 항목(Phrase)이 여러 단어로 이루어지면 각 단어를 하이픈(-)으로
+ * 연결해야 한다. 공백이 포함된 Phrase 는 `CreateVocabulary`/`UpdateVocabulary` 가
+ * 400 BadRequestException 으로 거부한다.
+ * 예) "machine learning" → "machine-learning", "인공 지능" → "인공-지능".
+ *
+ * 처리 순서:
+ * 1. 각 줄을 trim 후 빈 줄 제거.
+ * 2. 항목 내부의 연속 공백(스페이스/탭)을 단일 하이픈으로 치환.
+ * 3. 앞뒤 하이픈 정리(공백만 있던 항목이 빈 문자열이 되는 경우 방지).
+ * 4. 중복 제거(입력 순서 보존).
+ *
+ * @param raw 설정 textarea 의 원문(한 줄에 하나의 단어/구문).
+ * @returns AWS 에 전달 가능한 정규화된 Phrases 배열.
+ */
+export function normalizePhrases(raw: string): string[] {
+	const normalized = raw
+		.split("\n")
+		.map((line) =>
+			line
+				.trim()
+				.replace(/\s+/g, "-") // 여러 단어 항목을 하이픈으로 연결.
+				.replace(/^-+|-+$/g, ""), // 앞뒤 하이픈 제거.
+		)
+		.filter((line) => line.length > 0);
+
+	return [...new Set(normalized)];
+}
+
 export interface VocabSyncParams {
 	credentials: AwsCredentials;
 	region: string;
@@ -102,12 +134,8 @@ export class VocabularyManager {
 		const client = this.clientFactory(credentials, region);
 		const vocabName = this.buildVocabName(languageCode);
 
-		// 단어 목록 파싱: 빈 줄/공백 줄 제거, 중복 제거.
-		const lines = phrases
-			.split("\n")
-			.map((l) => l.trim())
-			.filter((l) => l.length > 0);
-		const uniquePhrases = [...new Set(lines)];
+		// 단어 목록 파싱: 빈 줄/공백 줄 제거, 여러 단어는 하이픈 연결, 중복 제거.
+		const uniquePhrases = normalizePhrases(phrases);
 
 		// 단어가 없으면 기존 Vocabulary 삭제 시도.
 		if (uniquePhrases.length === 0) {
