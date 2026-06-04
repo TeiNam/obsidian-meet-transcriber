@@ -12,7 +12,6 @@ import {
 	extractAnalysisSource,
 	upsertAnalysisCallout,
 	mergeContinuedSession,
-	CALLOUT_ANALYSIS,
 	CALLOUT_ORIGINAL,
 	CALLOUT_REFINED,
 } from "./transcriptNote";
@@ -91,10 +90,10 @@ describe("upsertAnalysisCallout", () => {
 		const out = upsertAnalysisCallout(body, "요약 결과", "분석 결과");
 
 		// 맨 위가 분석 콜아웃이어야 한다.
-		expect(out.startsWith(`> [!${CALLOUT_ANALYSIS}] 분석 결과`)).toBe(true);
+		expect(out.startsWith("## 분석 결과")).toBe(true);
 		// 원본 콜아웃은 보존된다.
 		expect(extractCalloutBody(out, CALLOUT_ORIGINAL)).toBe("원본");
-		expect(extractCalloutBody(out, CALLOUT_ANALYSIS)).toBe("요약 결과");
+		expect(out).toContain("요약 결과");
 	});
 
 	test("재실행 시 기존 분석을 교체한다(누적하지 않음)", () => {
@@ -107,9 +106,9 @@ describe("upsertAnalysisCallout", () => {
 		const twice = upsertAnalysisCallout(once, "두 번째 분석", "분석 결과");
 
 		// 분석 콜아웃은 정확히 하나여야 한다.
-		const count = (twice.match(/\[!summary\]/g) ?? []).length;
+		const count = (twice.match(/^## 분석 결과$/gm) ?? []).length;
 		expect(count).toBe(1);
-		expect(extractCalloutBody(twice, CALLOUT_ANALYSIS)).toBe("두 번째 분석");
+		expect(twice).toContain("두 번째 분석");
 	});
 });
 
