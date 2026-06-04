@@ -37,10 +37,6 @@ export const en = {
         analyzing: "Analyzing...",
         // 편집 모드 빈 내용 안내
         editorEmpty: "No content to edit.",
-        // 최근 전사 섹션 헤더
-        recentTranscripts: "Recent transcripts",
-        // 최근 전사 리스트에 항목이 없을 때
-        noRecentTranscripts: "No previous transcripts.",
         // 복사 성공 Notice
         copied: "Transcript copied to clipboard.",
         // 복사 실패 Notice
@@ -233,11 +229,11 @@ export const en = {
         refineFailed:
             "AI proofreading failed. The original transcript was saved.",
     },
-    // 분석 결과를 Transcript_Note에 부착할 때 사용하는 섹션 헤더 (Requirement 6.8)
-    analysisHeader: "## Analysis result",
-    // AI 교정본 / 원본 두 섹션 헤더. 사용자 결정 "원본 보존" 정책으로 양쪽 모두 노트에 저장.
-    refinedHeader: "## Refined transcript",
-    originalHeader: "## Original transcript",
+    // 콜아웃 섹션 제목. 노트 본문은 분석(summary) → 원본(quote) → 교정본(tip)
+    // 순서의 콜아웃 구조로 고정 기록된다. `## ` prefix 없이 제목 텍스트만 둔다.
+    analysisHeader: "Analysis result",
+    refinedHeader: "Refined transcript",
+    originalHeader: "Original transcript",
 };
 
 // 모든 로케일 파일이 준수해야 하는 번역 키 구조 타입.

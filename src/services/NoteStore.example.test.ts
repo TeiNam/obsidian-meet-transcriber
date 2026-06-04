@@ -9,7 +9,7 @@
  *   (Requirement 4.8)
  *
  * 추가로 NoteStore의 주요 I/O 경로(`ensureFolder`, `saveTranscript`의 충돌 회피,
- * `overwriteTranscript`의 프론트매터 보존, `appendAnalysis`의 로케일별 헤더,
+ * `overwriteTranscript`의 프론트매터 보존,
  * `readTranscriptBody`의 프론트매터 제거)에 대한 Vault 모킹 예시를 포함한다.
  *
  * 테스트 전략:
@@ -388,56 +388,6 @@ describe("NoteStore.overwriteTranscript", () => {
 
 		const [, written] = modifySpy.mock.calls[0];
 		expect(written).toBe("replacement");
-	});
-});
-
-// -----------------------------------------------------------------------------
-// appendAnalysis
-// -----------------------------------------------------------------------------
-
-describe("NoteStore.appendAnalysis", () => {
-	let vault: Vault;
-	let store: NoteStore;
-
-	beforeEach(() => {
-		resetNoticeCalls();
-		vault = new Vault();
-		store = new NoteStore(vault);
-	});
-
-	it("locale이 'en'이면 `## Analysis result` 헤더를 본문 끝에 부착한다 (Requirement 6.8)", async () => {
-		const file = makeTFile("n.md");
-		vi.spyOn(vault, "read").mockResolvedValue("existing body\n");
-		const modifySpy = vi.spyOn(vault, "modify").mockResolvedValue();
-
-		await store.appendAnalysis(file, "요약 결과", "en");
-
-		const [, written] = modifySpy.mock.calls[0];
-		expect(written).toBe(
-			"existing body\n\n## Analysis result\n\n요약 결과\n",
-		);
-	});
-
-	it("locale이 'ko'면 `## 분석 결과` 헤더를 부착한다 (Requirement 6.8)", async () => {
-		const file = makeTFile("n.md");
-		vi.spyOn(vault, "read").mockResolvedValue("기존 본문\n");
-		const modifySpy = vi.spyOn(vault, "modify").mockResolvedValue();
-
-		await store.appendAnalysis(file, "분석 결과 본문", "ko");
-
-		const [, written] = modifySpy.mock.calls[0];
-		expect(written).toBe("기존 본문\n\n## 분석 결과\n\n분석 결과 본문\n");
-	});
-
-	it("줄바꿈으로 끝나지 않는 본문에도 경계 라인을 보정하여 부착한다 (Requirement 6.9)", async () => {
-		const file = makeTFile("n.md");
-		vi.spyOn(vault, "read").mockResolvedValue("no-newline");
-		const modifySpy = vi.spyOn(vault, "modify").mockResolvedValue();
-
-		await store.appendAnalysis(file, "X", "en");
-
-		const [, written] = modifySpy.mock.calls[0];
-		expect(written).toBe("no-newline\n\n## Analysis result\n\nX\n");
 	});
 });
 

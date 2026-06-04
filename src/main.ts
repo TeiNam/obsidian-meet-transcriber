@@ -36,6 +36,12 @@ import type { SupportedLocale } from "./i18n";
 import type { Transcript_Segment } from "./domain/segments";
 import { format as formatTranscript } from "./domain/Sentence_Formatter";
 import { selectTargetLanguage } from "./domain/selectTargetLanguage";
+import {
+	buildTranscriptNoteBody,
+	mergeContinuedSession,
+	upsertAnalysisCallout,
+	extractAnalysisSource,
+} from "./domain/transcriptNote";
 import { SettingsStore } from "./settings/SettingsStore";
 import { TranscribeSettingTab } from "./settings/TranscribeSettingTab";
 import { StreamingStateMachine } from "./state/StreamingStateMachine";
@@ -316,16 +322,11 @@ export default class TranscribePlugin extends Plugin {
 
 	/**
 	 * 사이드바 뷰를 열거나 이미 열려 있으면 포커스를 이동한다(Requirement 1.2, 1.3).
-	 *
-	 * 열린 직후 최근 전사 리스트를 주입하여 첫 표시가 지연되지 않게 한다.
 	 */
 	async activateView(): Promise<void> {
 		const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_TRANSCRIBE);
 		if (existing.length > 0) {
 			this.app.workspace.revealLeaf(existing[0]);
-			this.forEachSidebar((view) =>
-				view.setRecentTranscripts(this.getRecentTranscripts()),
-			);
 			return;
 		}
 		const leaf: WorkspaceLeaf | null = this.app.workspace.getRightLeaf(false);
@@ -334,12 +335,6 @@ export default class TranscribePlugin extends Plugin {
 		}
 		await leaf.setViewState({ type: VIEW_TYPE_TRANSCRIBE, active: true });
 		this.app.workspace.revealLeaf(leaf);
-		// setViewState 이후 뷰가 초기화되므로 리스트 주입은 마이크로태스크로 한 번 지연.
-		queueMicrotask(() => {
-			this.forEachSidebar((view) =>
-				view.setRecentTranscripts(this.getRecentTranscripts()),
-			);
-		});
 	}
 
 	/**
@@ -720,60 +715,13 @@ export default class TranscribePlugin extends Plugin {
 	}
 
 	/**
-	 * 사이드바의 "최근 전사" 리스트에 노출할 파일 목록을 반환한다.
-	 *
-	 * 현재 설정된 `transcriptFolder` 를 대상으로 최대 5개를 mtime 내림차순으로 조회한다.
-	 * 순수 조회 메서드이며 부작용은 없다.
-	 */
-	getRecentTranscripts(): TFile[] {
-		return this.noteStore.listRecentTranscripts(
-			this.settings.transcriptFolder,
-			5,
-		);
-	}
-
-	/**
-	 * 최근 전사 리스트에서 항목을 클릭했을 때의 핸들러.
-	 *
-	 * - 스트리밍 중에는 차단(현재 세션을 덮어쓰면 데이터 손실 가능).
-	 * - 선택된 파일 본문을 읽어 현재 편집/분석 대상으로 승격한다.
-	 * - 상태는 유지하고 버튼 활성 정책만 재계산한다.
-	 */
-	async handleRecentTranscriptClick(file: TFile): Promise<void> {
-		if (this.state.getState() === "streaming") {
-			new Notice(
-				this.t.notices.streamingBlockEditAnalyze,
-				NOTICE_DURATION_MS,
-			);
-			return;
-		}
-		let body: string;
-		try {
-			body = await this.noteStore.readTranscriptBody(file);
-		} catch (err) {
-			console.error("[TranscribePlugin] readTranscriptBody failed:", err);
-			new Notice(this.t.notices.ioError, NOTICE_DURATION_MS);
-			return;
-		}
-		this.currentTranscriptFile = file;
-		this.currentNoteBodyLength = body.length;
-		// 새 세션이 아니라 기존 노트 로드이므로 현재 버퍼/세션 시작 시각은 유지하지 않는다.
-		this.transcribeService.clearBuffer();
-		this.sessionStartedAt = null;
-		// 로드한 노트를 다음 Start 부터 이어서 작성한다.
-		this.continueSession = true;
-		this.forEachSidebar((view) => view.loadNoteContent(body));
-		this.refreshSidebarButtons();
-	}
-
-	/**
 	 * "새 전사" 버튼 클릭 핸들러 — 다음 스트리밍을 새 세션으로 초기화한다.
 	 *
 	 * - 스트리밍 중에는 차단(진행 중 세션을 끊지 않도록).
 	 * - 버퍼/노트 참조/화면/세션 시작 시각을 모두 비우고 `continueSession` 을 끈다.
 	 * - 이후 Start 를 누르면 기존 노트를 이어 쓰지 않고 새 노트를 생성한다.
 	 *
-	 * 이전 노트 파일 자체는 vault 에 그대로 남으며, 최근 전사 리스트에서 다시 열 수 있다.
+	 * 이전 노트 파일 자체는 vault 에 그대로 남는다.
 	 */
 	handleNewSessionClick(): void {
 		if (this.state.getState() === "streaming") {
@@ -799,7 +747,7 @@ export default class TranscribePlugin extends Plugin {
 	 * 1. 스트리밍 중이면 차단(Requirement 7.4).
 	 * 2. 자격 증명/모델 누락 검사 → 누락 필드 Notice 후 중단(Requirement 2.14).
 	 * 3. 현재 노트 본문 읽기 → 길이 초과 시 Notice 후 중단(Requirement 6.5).
-	 * 4. 스피너 on → `BedrockService.analyze` 호출 → 성공 시 `appendAnalysis`.
+	 * 4. 스피너 on → `BedrockService.analyze` 호출 → 성공 시 `upsertAnalysisCallout` 후 `overwriteTranscript`.
 	 * 5. 실패/타임아웃 코드별 Notice 매핑(Requirement 6.11~6.15).
 	 * 6. finally: 스피너 off + 버튼 상태 재계산.
 	 */
@@ -835,7 +783,11 @@ export default class TranscribePlugin extends Plugin {
 			return;
 		}
 
-		if (body.length > MAX_TRANSCRIPT_LENGTH) {
+		// 분석 입력: 콜아웃 구조에서 교정본(있으면) 또는 원본을 추출한다. 분석/원본/교정본이
+		// 섞인 노트 전체가 아니라 전사 본문만 모델에 넘겨 분석 품질을 높인다.
+		const analysisSource = extractAnalysisSource(body);
+
+		if (analysisSource.length > MAX_TRANSCRIPT_LENGTH) {
 			new Notice(this.t.notices.transcriptTooLong, NOTICE_DURATION_MS);
 			return;
 		}
@@ -849,18 +801,20 @@ export default class TranscribePlugin extends Plugin {
 				credentials: this.currentCredentials(),
 				region: this.settings.region,
 				modelId: this.settings.bedrockModelId,
-				transcript: body,
+				transcript: analysisSource,
 				locale: this.settings.uiLocale,
 				glossary: this.settings.analysisGlossary,
 			});
 			try {
-				await this.noteStore.appendAnalysis(
-					file,
+				// 분석 결과를 본문 맨 위 summary 콜아웃으로 삽입(기존 분석은 교체).
+				const updatedBody = upsertAnalysisCallout(
+					body,
 					analysis,
-					this.settings.uiLocale,
+					this.t.analysisHeader,
 				);
+				await this.noteStore.overwriteTranscript(file, updatedBody);
 			} catch (err) {
-				console.error("[TranscribePlugin] appendAnalysis failed:", err);
+				console.error("[TranscribePlugin] upsertAnalysis failed:", err);
 				new Notice(this.t.notices.ioError, NOTICE_DURATION_MS);
 				return;
 			}
@@ -1002,10 +956,6 @@ export default class TranscribePlugin extends Plugin {
 				const body = await this.noteStore.readTranscriptBody(file);
 				this.currentNoteBodyLength = body.length;
 				this.forEachSidebar((view) => view.loadNoteContent(body));
-				// 저장 직후 "최근 전사" 리스트를 새로고침해 방금 저장된 항목이 즉시 노출되도록 한다.
-				this.forEachSidebar((view) =>
-					view.setRecentTranscripts(this.getRecentTranscripts()),
-				);
 				// 저장에 성공했으므로 다음 Start 는 이 노트를 이어서 작성한다.
 				// "새 전사" 버튼을 눌러야 새 노트로 분기한다.
 				this.continueSession = true;
@@ -1366,24 +1316,37 @@ export default class TranscribePlugin extends Plugin {
 			translationOutputFormat: this.settings.translationOutputFormat,
 		});
 
-		// AI 교정 (자동 + 원본 보존). 토글이 켜져 있고 자격 증명/모델/리전이 모두 있으면
-		// 노트 저장 직전에 Bedrock 로 본문의 표면 표기만 다듬는다.
-		// 실패하면 원본만 저장하고 Notice 로 알린다 (사용자가 본문을 잃지 않게).
-		const body = await this.refineIfEnabled(original);
+		// AI 교정(원본 보존). 토글이 켜져 있고 자격 증명/모델/리전이 모두 있으면 교정본을
+		// 만든다. 실패/비활성 시 null 이며 원본 콜아웃만 기록된다.
+		const refined = await this.refineOrNull(original);
+		const titles = {
+			analysis: this.t.analysisHeader,
+			original: this.t.originalHeader,
+			refined: this.t.refinedHeader,
+		};
 
-		// 이어하기: 기존 노트가 있으면 새 파일을 만들지 않고 본문 뒤에 구분선과 함께 append.
+		// 이어하기: 기존 노트의 원본/교정본 콜아웃 안쪽에 세션 구분선과 함께 병합한다
+		// (콜아웃을 새로 추가하지 않고 각 1개로 유지). 새 파일은 만들지 않는다.
 		const isContinuing =
 			this.continueSession && this.currentTranscriptFile !== null;
 		if (isContinuing && this.currentTranscriptFile !== null) {
 			const file = this.currentTranscriptFile;
 			const existingBody = await this.noteStore.readTranscriptBody(file);
 			const divider = this.t.ui.sessionDivider(formatSessionTime(new Date()));
-			const combined = `${existingBody.replace(/\s+$/, "")}\n\n${divider}\n\n${body}`;
+			const combined = mergeContinuedSession({
+				existingBody,
+				newOriginal: original,
+				newRefined: refined,
+				divider,
+				titles,
+			});
 			await this.noteStore.overwriteTranscript(file, combined);
 			this.transcribeService.clearBuffer();
 			this.sessionStartedAt = null;
 			return file;
 		}
+
+		const body = buildTranscriptNoteBody({ original, refined, titles });
 
 		const meta: TranscriptNoteMeta = {
 			startedAt: this.sessionStartedAt ?? new Date().toISOString(),
@@ -1403,20 +1366,12 @@ export default class TranscribePlugin extends Plugin {
 	}
 
 	/**
-	 * `refineEnabled` 가 true 이고 자격 증명/모델/리전이 모두 갖춰진 경우에만
-	 * `BedrockService.refineTranscript` 를 호출해 본문을 교정한다.
-	 *
-	 * 반환:
-	 * - 토글이 꺼져 있거나 자격 증명이 부족하면 `original` 을 그대로 반환.
-	 * - 교정 성공 시 `## 교정본 + 교정 결과 + ## 원본 + 원본` 두 섹션으로 합친 본문.
-	 *   사용자 결정 "원본 보존" 정책으로 양쪽 모두 노트에 보존된다.
-	 * - 교정 실패 (인증/네트워크/타임아웃/모델 미지원/길이 초과) 시 `original` 만 반환하고
-	 *   `notices.refineFailed` Notice 를 띄운다. 본문은 절대 잃지 않는다.
+	 * 교정본을 반환한다. 교정이 비활성/자격증명 부족/실패/빈 응답이면 `null`.
+	 * 본문 조립에서 교정본 콜아웃 포함 여부를 결정하는 데 쓰인다.
 	 */
-	private async refineIfEnabled(original: string): Promise<string> {
-		if (!this.settings.refineEnabled) return original;
-		// 자격 증명 / 모델 / 리전 어느 하나라도 비어 있으면 교정 단계 자체를 건너뛴다
-		// (분석과 동일 가드). 빈 본문은 애초에 호출되지 않지만 방어적으로 한 번 더 확인.
+	private async refineOrNull(original: string): Promise<string | null> {
+		if (!this.settings.refineEnabled) return null;
+		// 자격 증명 / 모델 / 리전 어느 하나라도 비어 있으면 교정 단계 자체를 건너뛴다.
 		if (
 			this.settings.accessKeyId.trim().length === 0 ||
 			this.settings.secretAccessKey.trim().length === 0 ||
@@ -1424,7 +1379,7 @@ export default class TranscribePlugin extends Plugin {
 			this.settings.bedrockModelId.trim().length === 0 ||
 			original.trim().length === 0
 		) {
-			return original;
+			return null;
 		}
 
 		try {
@@ -1444,17 +1399,13 @@ export default class TranscribePlugin extends Plugin {
 				// 모델이 빈 응답을 준 경우는 실패와 동급으로 취급해 원본만 저장.
 				console.error("[TranscribePlugin] refine returned empty body");
 				new Notice(this.t.notices.refineFailed);
-				return original;
+				return null;
 			}
-			// 두 섹션으로 결합. 교정본을 위에, 원본을 아래에 두어 첫 인상을 정돈된 형태로.
-			return (
-				`${this.t.refinedHeader}\n\n${refinedTrimmed}\n\n` +
-				`${this.t.originalHeader}\n\n${original.trimEnd()}\n`
-			);
+			return refinedTrimmed;
 		} catch (err) {
 			console.error("[TranscribePlugin] refine failed:", err);
 			new Notice(this.t.notices.refineFailed);
-			return original;
+			return null;
 		}
 	}
 

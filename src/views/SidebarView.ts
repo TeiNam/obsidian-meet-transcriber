@@ -8,7 +8,7 @@
 // 관련 요구사항: 1.7, 1.8, 1.9, 1.10, 3.5, 3.6, 3.7, 3.8, 4.7, 5.3, 5.4, 5.6,
 // 5.8, 5.9, 6.6, 6.16, 7.3, 7.4, 9.5, 10.4, 10.5
 
-import { ItemView, setIcon, type App, type TFile, type WorkspaceLeaf } from "obsidian";
+import { ItemView, setIcon, type App, type WorkspaceLeaf } from "obsidian";
 import type { Translations } from "../i18n";
 import type { Transcript_Segment } from "../domain/segments";
 import type { BedrockCatalogEntry } from "../services/BedrockModelCatalog";
@@ -32,11 +32,6 @@ import {
 	type SpeakerCapacityNoticeHandle,
 	type TranslationCostCounterHandle,
 } from "./SidebarStatusExtras";
-import {
-	formatRelativeMtime,
-	formatTranscriptDisplayName,
-} from "./sidebarFormatters";
-
 /**
  * 사이드바 뷰 타입 식별자.
  *
@@ -112,15 +107,6 @@ export interface TranscribePluginLike {
 	handleCancelEditClick(): void;
 	/** 복사 버튼 핸들러. 현재 뷰에 표시된 본문 텍스트를 받아 클립보드로 보낸다. */
 	handleCopyClick?(text: string): void | Promise<void>;
-	/** 최근 전사 리스트에서 항목을 선택했을 때 호출된다. */
-	handleRecentTranscriptClick?(file: TFile): void | Promise<void>;
-	/**
-	 * 최근 전사 파일 목록 조회(선택 구현).
-	 *
-	 * 뷰가 `onOpen()` 에서 직접 호출해 초기 로딩 시 리스트를 즉시 채울 때 사용한다.
-	 * 플러그인이 이 메서드를 구현하지 않아도 뷰는 빈 배열로 동작한다.
-	 */
-	getRecentTranscripts?(): TFile[];
 
 	// ─ 사이드바 인라인 컨트롤(언어/모델 빠른 선택)용 계약 ───────────
 	// 설정 탭을 거치지 않고도 세션 단위로 자주 바뀌는 두 값을 즉시 변경할 수 있게 한다.
@@ -220,7 +206,6 @@ export class SidebarView extends ItemView {
 	private committedSpan: HTMLSpanElement | null = null;
 	private partialSpan: HTMLSpanElement | null = null;
 	private editorTextareaEl: HTMLTextAreaElement | null = null;
-	private recentListEl: HTMLDivElement | null = null;
 
 	// TASK 25 신규 위젯 핸들 — 가시성 변경 시 DOM 재생성 없이 클래스 토글만 수행.
 	private speakerCapacityHandle: SpeakerCapacityNoticeHandle | null = null;
@@ -255,9 +240,6 @@ export class SidebarView extends ItemView {
 	private inlineControlsHandle: { refreshModelOptions: () => void } | null =
 		null;
 
-	/** 최근 전사 파일 목록(플러그인에서 주입). 기본은 빈 배열. */
-	private recentTranscripts: TFile[] = [];
-
 	constructor(leaf: WorkspaceLeaf, private plugin: TranscribePluginLike) {
 		super(leaf);
 	}
@@ -282,14 +264,6 @@ export class SidebarView extends ItemView {
 
 	async onOpen(): Promise<void> {
 		this.render();
-		// 앱 시작 시 사이드바가 이미 열려 있는 상태로 복원되면 activateView()가 호출되지 않는다.
-		// 뷰 자신이 초기 리스트를 주입해 "항상 최신 상태"를 보장한다.
-		try {
-			const files = this.plugin.getRecentTranscripts?.() ?? [];
-			this.setRecentTranscripts(files);
-		} catch (err) {
-			console.error("[SidebarView] initial recent list load failed:", err);
-		}
 	}
 
 	async onClose(): Promise<void> {
@@ -332,9 +306,6 @@ export class SidebarView extends ItemView {
 		} else {
 			this.renderReadMode();
 		}
-
-		// 최근 전사 리스트 — 컨텐츠 영역 아래 배치.
-		this.renderRecentList(root);
 
 		this.refreshButtons();
 	}
@@ -497,17 +468,6 @@ export class SidebarView extends ItemView {
 			this.spinnerEl.toggleClass("is-hidden", !visible);
 		}
 		this.refreshButtons();
-	}
-
-	/**
-	 * 플러그인이 최근 전사 파일 목록을 주입할 때 호출한다.
-	 *
-	 * 전달받은 배열(mtime 내림차순, 최대 5개)을 그대로 저장하고 DOM 을 다시 그린다.
-	 * 리스트가 비어 있으면 "이전 전사 내역이 없습니다" 안내 문구를 노출한다.
-	 */
-	setRecentTranscripts(files: TFile[]): void {
-		this.recentTranscripts = files;
-		this.renderRecentListBody();
 	}
 
 	/**
@@ -922,55 +882,6 @@ export class SidebarView extends ItemView {
 	}
 
 	/**
-	 * 최근 전사 섹션의 컨테이너를 그린다. 실제 항목은 `renderRecentListBody`가 다시 채운다.
-	 */
-	private renderRecentList(root: HTMLElement): void {
-		const section = root.createDiv({ cls: "transcribe-recent" });
-		section.createEl("h4", {
-			cls: "transcribe-recent__heading",
-			text: this.plugin.t.ui.recentTranscripts,
-		});
-		this.recentListEl = section.createDiv({ cls: "transcribe-recent__list" });
-		this.renderRecentListBody();
-	}
-
-	/**
-	 * 최근 전사 리스트 본문을 최신 `recentTranscripts` 값으로 재구성한다.
-	 *
-	 * 각 항목은 클릭 가능한 버튼으로 렌더되며, 클릭 시 플러그인의 핸들러로 파일을 전달한다.
-	 */
-	private renderRecentListBody(): void {
-		const container = this.recentListEl;
-		if (!container) return;
-		container.empty();
-
-		if (this.recentTranscripts.length === 0) {
-			container.createSpan({
-				cls: "transcribe-recent__empty",
-				text: this.plugin.t.ui.noRecentTranscripts,
-			});
-			return;
-		}
-
-		for (const file of this.recentTranscripts) {
-			const item = container.createEl("button", {
-				cls: "transcribe-recent__item",
-			});
-			item.createSpan({
-				cls: "transcribe-recent__title",
-				text: formatTranscriptDisplayName(file.basename),
-			});
-			item.createSpan({
-				cls: "transcribe-recent__meta",
-				text: formatRelativeMtime(file.stat.mtime),
-			});
-			this.plugin.registerDomEvent(item, "click", () => {
-				void this.plugin.handleRecentTranscriptClick?.(file);
-			});
-		}
-	}
-
-	/**
 	 * 현재 뷰에 "사용자에게 보이는" 본문 텍스트를 반환한다.
 	 *
 	 * - 편집 모드: textarea 의 현재 값.
@@ -1003,7 +914,6 @@ export class SidebarView extends ItemView {
 		this.committedSpan = null;
 		this.partialSpan = null;
 		this.editorTextareaEl = null;
-		this.recentListEl = null;
 		this.inlineControlsHandle = null;
 		// TASK 25 — 신규 위젯 핸들 / 라인 컨테이너 ref 도 함께 비운다.
 		this.speakerCapacityHandle = null;

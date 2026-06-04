@@ -11,7 +11,7 @@
  * - **사용자 입력 경로는 `normalizePath`로 정규화**한 뒤 Vault API에 전달한다
  *   (Requirements 9.8). 절대 경로나 `..` 경로 탐색이 Vault로 새어 나가지 않는다.
  * - **프론트매터는 Obsidian 관용 형식**(YAML 블록 `---` ... `---`)으로 직렬화하며,
- *   분석 결과 추가(`appendAnalysis`)와 편집 저장(`overwriteTranscript`)에서 값 변경 없이 보존한다
+ *   편집 저장(`overwriteTranscript`)에서 값 변경 없이 보존한다
  *   (Requirements 4.6, 5.5, 6.9).
  * - `resolveUniqueFilename`은 **순수 함수**로 분리하여 PBT 대상으로 만든다
  *   (design.md Property 6).
@@ -38,8 +38,6 @@
 
 import { Notice, TFile, TFolder, Vault, normalizePath } from "obsidian";
 
-import type { SupportedLocale } from "../i18n";
-import { createI18n } from "../i18n";
 import type { Curated_Target_Language, LanguageCode } from "../types/settings";
 
 /**
@@ -298,37 +296,6 @@ export class NoteStore {
 	}
 
 	/**
-	 * 분석 결과를 Transcript_Note 본문 끝에 새 섹션으로 추가한다.
-	 *
-	 * `Vault.process`를 사용하여 기존 콘텐츠를 100% 보존하면서 뒤에 이어 붙인다
-	 * (Requirements 6.8, 6.9, 6.10 / Property 9).
-	 *
-	 * 추가 포맷:
-	 * ```
-	 * <기존 내용>
-	 *
-	 * ## Analysis result  (또는 "## 분석 결과")
-	 *
-	 * <analysis>
-	 * ```
-	 *
-	 * 기존 본문에 이미 분석 결과 섹션이 있더라도 **제거하지 않고** 새 섹션을 추가한다
-	 * (Requirements 6.10 / Property 9).
-	 *
-	 * @param file - 대상 마크다운 파일.
-	 * @param analysis - Bedrock이 반환한 분석 결과 본문.
-	 * @param locale - UI 로케일. 헤더 문자열 선택에 사용(`"## Analysis result"` vs `"## 분석 결과"`).
-	 */
-	async appendAnalysis(file: TFile, analysis: string, locale: SupportedLocale): Promise<void> {
-		const header = createI18n(locale).analysisHeader;
-		await this.vault.process(file, (content) => {
-			// 기존 내용이 줄바꿈으로 끝나지 않을 수도 있으므로 경계 라인을 보정한다.
-			const separator = content.endsWith("\n") ? "\n" : "\n\n";
-			return `${content}${separator}${header}\n\n${analysis}\n`;
-		});
-	}
-
-	/**
 	 * 프론트매터를 제외한 Transcript_Note의 본문만 읽어 반환한다.
 	 *
 	 * Sidebar_View의 텍스트 영역 로드, 편집 모드 초기값 주입, 분석 요청 본문 구성 등에서 사용한다.
@@ -379,37 +346,6 @@ export class NoteStore {
 		new Notice(
 			message ?? "Could not create the transcript folder. Saving to the vault root instead.",
 		);
-	}
-
-	/**
-	 * 지정 폴더(서브폴더 제외)의 마크다운 파일을 수정 시각 내림차순으로 최대 `limit` 개 조회한다.
-	 *
-	 * 사이드바의 "최근 전사" 리스트 구성에 사용한다. 본문을 읽지 않고 `TFile` 메타데이터만
-	 * 참조하므로 비용이 거의 없다.
-	 *
-	 * @param folderPath - 전사 폴더 경로. 빈 문자열이면 vault 루트를 대상으로 한다.
-	 *   `normalizePath` 로 정규화된 경로를 기대한다(호출 측에서 정규화하지 않더라도 내부에서 한 번 더 수행).
-	 * @param limit - 최대 반환 개수. 기본 5.
-	 * @returns 수정 시각(mtime) 내림차순 `TFile[]`. 폴더가 없거나 비어 있으면 빈 배열.
-	 */
-	listRecentTranscripts(folderPath: string, limit: number = 5): TFile[] {
-		const normalized = folderPath === "" ? "" : normalizePath(folderPath);
-		const folder: TFolder =
-			normalized === ""
-				? this.vault.getRoot()
-				: (() => {
-						const abs = this.vault.getAbstractFileByPath(normalized);
-						return abs instanceof TFolder ? abs : this.vault.getRoot();
-					})();
-
-		const files: TFile[] = [];
-		for (const child of folder.children) {
-			if (child instanceof TFile && child.extension === "md") {
-				files.push(child);
-			}
-		}
-		files.sort((a, b) => b.stat.mtime - a.stat.mtime);
-		return files.slice(0, Math.max(0, limit));
 	}
 }
 

@@ -40,10 +40,6 @@ export const ko: Translations = {
         analyzing: "분석 중...",
         // 편집 모드 빈 내용 안내
         editorEmpty: "편집할 내용이 없습니다.",
-        // 최근 전사 섹션 헤더
-        recentTranscripts: "최근 전사",
-        // 최근 전사 리스트에 항목이 없을 때
-        noRecentTranscripts: "이전 전사 내역이 없습니다.",
         // 복사 성공 Notice
         copied: "전사 내용을 클립보드에 복사했습니다.",
         // 복사 실패 Notice
@@ -233,9 +229,9 @@ export const ko: Translations = {
         refineFailed:
             "AI 교정에 실패했습니다. 원본 전사가 그대로 저장되었습니다.",
     },
-    // 분석 결과를 Transcript_Note에 부착할 때 사용하는 섹션 헤더 (Requirement 6.8)
-    analysisHeader: "## 분석 결과",
-    // AI 교정본 / 원본 두 섹션 헤더. 사용자 결정 "원본 보존" 정책으로 양쪽 모두 노트에 저장.
-    refinedHeader: "## 교정본",
-    originalHeader: "## 원본",
+    // 콜아웃 섹션 제목. 노트 본문은 분석(summary) → 원본(quote) → 교정본(tip)
+    // 순서의 콜아웃 구조로 고정 기록된다. `## ` prefix 없이 제목 텍스트만 둔다.
+    analysisHeader: "분석 결과",
+    refinedHeader: "교정본",
+    originalHeader: "원본",
 };

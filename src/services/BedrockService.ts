@@ -25,6 +25,10 @@ import {
 import { TranscribeError } from "../types/errors";
 import type { AwsCredentials } from "../types/settings";
 import type { SupportedLocale } from "../i18n";
+import {
+	splitTranscriptIntoChunks,
+	joinRefinedChunks,
+} from "./refineChunking";
 
 /**
  * 본문 길이 한계. 초과 시 요청을 개시하지 않는다(Requirements 6.5).
@@ -57,12 +61,30 @@ const MAX_TRANSCRIPT_LENGTH = 200_000;
 const DEFAULT_TIMEOUT_MS = 60_000;
 
 /**
- * Claude 3 계열 요청 본문의 `max_tokens` 값.
+ * Claude 계열 요청 본문의 `max_tokens` 값.
  *
- * design.md §7의 "Claude 3 계열 요청 본문 구성" 예시에 정의된 값.
- * 프롬프트가 요구하는 요약/키워드/실행 항목을 여유 있게 담기 위한 상한이다.
+ * 분석(analyze)은 출력이 짧으므로 이 값으로 충분하다. 교정(refine)은 입력 본문을
+ * 거의 같은 길이로 되돌려야 하므로 별도의 더 큰 상한(`REFINE_MAX_TOKENS`)을 쓴다.
  */
-const CLAUDE_MAX_TOKENS = 4000;
+const CLAUDE_MAX_TOKENS = 8192;
+
+/**
+ * `refineTranscript` 단일 호출의 `max_tokens` 값.
+ *
+ * 교정은 입력≈출력 작업이라 출력 토큰이 부족하면 교정본이 중간에서 잘린다(원본은
+ * 모델을 거치지 않아 영향 없음). 청크 크기(`REFINE_CHUNK_CHAR_LIMIT`)를 이 출력
+ * 한도 안에 들어오도록 잡아 한 청크가 절대 잘리지 않게 한다.
+ */
+const REFINE_MAX_TOKENS = 8192;
+
+/**
+ * `refineTranscript` 청크 분할의 문자 수 임계치.
+ *
+ * 한국어 기준 대략 1토큰 ≈ 1.5~2자이므로 8192 출력 토큰이면 안전하게 약 1만 자까지
+ * 담을 수 있다. 프롬프트/오버헤드와 모델별 편차를 감안해 보수적으로 6,000자로 잡고,
+ * 이를 넘는 전사는 줄 경계 기준으로 여러 청크로 나눠 순차 교정한다.
+ */
+const REFINE_CHUNK_CHAR_LIMIT = 6_000;
 
 /**
  * Anthropic on Bedrock 요청 스키마 버전 식별자.
@@ -481,7 +503,52 @@ export class BedrockService {
 			);
 		}
 
+		// 긴 회의는 출력 토큰 한도에 막혀 한 번에 교정하면 잘린다. 줄 경계로 청크를
+		// 나눠 각각 교정한 뒤 합친다. 짧은 전사는 청크가 1개라 단일 호출과 동일하다.
+		const chunks = splitTranscriptIntoChunks(transcript, REFINE_CHUNK_CHAR_LIMIT);
+		if (chunks.length === 0) {
+			return "";
+		}
+
 		const client = this.clientFactory(credentials, region);
+		const refinedChunks: string[] = [];
+
+		for (const chunk of chunks) {
+			const refined = await this.refineChunk(client, {
+				chunk,
+				modelId,
+				timeoutMs,
+				locale,
+				userInstruction,
+			});
+			// 청크 교정이 빈 결과면(일시적 실패/빈 응답) 해당 청크만 원본을 유지해
+			// 전체 본문을 잃지 않는다 (부분 실패 격리).
+			refinedChunks.push(refined.trim().length > 0 ? refined : chunk);
+		}
+
+		return joinRefinedChunks(refinedChunks);
+	}
+
+	/**
+	 * 단일 전사 청크를 Bedrock 으로 교정한다(`refineTranscript` 내부 헬퍼).
+	 *
+	 * 자격 증명/모델 오류(`AWS_AUTH` / `AWS_MODEL_UNAVAILABLE`)는 재시도해도
+	 * 의미가 없으므로 그대로 throw 하여 전체 교정을 즉시 중단시킨다. 네트워크/타임아웃
+	 * 등 일시적 오류는 빈 문자열을 반환해 호출부가 해당 청크를 원본으로 대체하게 한다.
+	 *
+	 * @returns 교정된 청크 텍스트. 일시적 실패 시 빈 문자열.
+	 */
+	private async refineChunk(
+		client: BedrockRuntimeClient,
+		args: {
+			chunk: string;
+			modelId: string;
+			timeoutMs: number;
+			locale: SupportedLocale;
+			userInstruction?: string;
+		},
+	): Promise<string> {
+		const { chunk, modelId, timeoutMs, locale, userInstruction } = args;
 
 		const systemPrompt = REFINE_SYSTEM_PROMPT_BY_LOCALE[locale];
 		const trimmedInstruction = userInstruction?.trim() ?? "";
@@ -489,11 +556,11 @@ export class BedrockService {
 			trimmedInstruction.length > 0
 				? `--- additional instructions ---\n${trimmedInstruction}\n--- end additional instructions ---\n\n`
 				: "";
-		const userMessage = `${userPrefix}--- transcript start ---\n${transcript}\n--- transcript end ---`;
+		const userMessage = `${userPrefix}--- transcript start ---\n${chunk}\n--- transcript end ---`;
 
 		const requestJson = JSON.stringify({
 			anthropic_version: ANTHROPIC_VERSION,
-			max_tokens: CLAUDE_MAX_TOKENS,
+			max_tokens: REFINE_MAX_TOKENS,
 			system: systemPrompt,
 			messages: [
 				{
@@ -528,16 +595,9 @@ export class BedrockService {
 				throw err;
 			}
 
-			if (isAbortError(err)) {
-				const reason = timedOut
-					? `Bedrock request timed out after ${timeoutMs} ms.`
-					: "Bedrock request was aborted.";
-				console.error("[BedrockService.refine] aborted:", reason);
-				throw new TranscribeError(reason, "AWS_NETWORK", err);
-			}
-
 			const name = getErrorName(err);
 
+			// 자격 증명/모델 오류는 재시도 무의미 — 즉시 전파해 전체 교정을 중단한다.
 			if (name === "AccessDeniedException" || name === "UnrecognizedClientException") {
 				console.error("[BedrockService.refine] auth error:", name);
 				throw new TranscribeError(
@@ -556,15 +616,20 @@ export class BedrockService {
 				);
 			}
 
-			console.error(
-				"[BedrockService.refine] network/unknown error:",
-				name || "unknown",
-			);
-			throw new TranscribeError(
-				"Bedrock request failed.",
-				"AWS_NETWORK",
-				err,
-			);
+			// 네트워크/타임아웃 등 일시적 오류는 빈 문자열을 반환해 호출부가
+			// 해당 청크를 원본으로 대체하도록 한다(부분 실패 격리).
+			if (isAbortError(err)) {
+				const reason = timedOut
+					? `Bedrock request timed out after ${timeoutMs} ms.`
+					: "Bedrock request was aborted.";
+				console.error("[BedrockService.refine] chunk aborted:", reason);
+			} else {
+				console.error(
+					"[BedrockService.refine] chunk network/unknown error:",
+					name || "unknown",
+				);
+			}
+			return "";
 		} finally {
 			clearTimeout(timer);
 		}
