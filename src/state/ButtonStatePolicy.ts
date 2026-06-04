@@ -34,6 +34,13 @@ export interface ButtonStates {
     startStop: { enabled: boolean; labelKey: "start" | "stop" };
     edit: { enabled: boolean };
     analyze: { enabled: boolean };
+    /**
+     * "새 전사 시작(초기화)" 버튼.
+     *
+     * 누르면 현재 버퍼/노트 참조를 비워 다음 `start`가 새 세션으로 시작되도록 한다.
+     * 이어할 대상(노트 또는 버퍼 본문)이 있고, 스트리밍/분석/편집 중이 아닐 때만 활성.
+     */
+    newSession: { enabled: boolean };
 }
 
 /**
@@ -76,9 +83,18 @@ export function computeButtonStates(inputs: ButtonStateInputs): ButtonStates {
     // 분석 버튼: 편집 조건 + AWS 자격 증명과 Bedrock 모델이 모두 필요.
     const analyzeEnabled = editEnabled && hasCredentials && hasBedrockModel;
 
+    // 새 전사 시작(초기화) 버튼: 이어할 대상(노트 또는 버퍼 본문)이 있고,
+    // 스트리밍/분석/편집 중이 아닐 때만 활성. 초기화할 게 없으면(빈 상태) 비활성.
+    const newSessionEnabled =
+        (hasTranscriptNote || transcriptLength >= 1) &&
+        streamingState !== "streaming" &&
+        !isAnalyzing &&
+        !isEditing;
+
     return {
         startStop: { enabled: startStopEnabled, labelKey: startStopLabelKey },
         edit: { enabled: editEnabled },
         analyze: { enabled: analyzeEnabled },
+        newSession: { enabled: newSessionEnabled },
     };
 }

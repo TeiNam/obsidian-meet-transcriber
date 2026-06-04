@@ -100,7 +100,37 @@ describe("ButtonStatePolicy — Property 2: 버튼 상태 결정 규칙", () => 
 		);
 	});
 
-	test("isAnalyzing === true → 세 버튼 모두 enabled === false", () => {
+	test("newSession.enabled ⇔ (hasTranscriptNote || transcriptLength >= 1) && streamingState !== 'streaming' && !isAnalyzing && !isEditing", () => {
+		fc.assert(
+			fc.property(inputsArb, (inputs) => {
+				const { newSession } = computeButtonStates(inputs);
+				const expected =
+					(inputs.hasTranscriptNote || inputs.transcriptLength >= 1) &&
+					inputs.streamingState !== "streaming" &&
+					!inputs.isAnalyzing &&
+					!inputs.isEditing;
+				expect(newSession.enabled).toBe(expected);
+			}),
+			{ numRuns: NUM_RUNS },
+		);
+	});
+
+	test("streamingState === 'streaming' → newSession.enabled === false (스트리밍 중 초기화 차단)", () => {
+		const streamingInputsArb = inputsArb.map((inputs) => ({
+			...inputs,
+			streamingState: "streaming" as StreamingState,
+		}));
+
+		fc.assert(
+			fc.property(streamingInputsArb, (inputs) => {
+				const { newSession } = computeButtonStates(inputs);
+				expect(newSession.enabled).toBe(false);
+			}),
+			{ numRuns: NUM_RUNS },
+		);
+	});
+
+	test("isAnalyzing === true → 네 버튼 모두 enabled === false", () => {
 		// 분석 중 플래그만 true로 강제하고 나머지는 임의 값으로 샘플링한다.
 		const analyzingInputsArb = inputsArb.map((inputs) => ({
 			...inputs,
@@ -109,10 +139,12 @@ describe("ButtonStatePolicy — Property 2: 버튼 상태 결정 규칙", () => 
 
 		fc.assert(
 			fc.property(analyzingInputsArb, (inputs) => {
-				const { startStop, edit, analyze } = computeButtonStates(inputs);
+				const { startStop, edit, analyze, newSession } =
+					computeButtonStates(inputs);
 				expect(startStop.enabled).toBe(false);
 				expect(edit.enabled).toBe(false);
 				expect(analyze.enabled).toBe(false);
+				expect(newSession.enabled).toBe(false);
 			}),
 			{ numRuns: NUM_RUNS },
 		);

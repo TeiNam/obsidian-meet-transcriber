@@ -24,6 +24,7 @@ export const ko: Translations = {
         copy: "복사",
         save: "저장",
         cancel: "취소",
+        newSession: "새 전사",
     },
     states: {
         idle: "대기",
@@ -47,6 +48,8 @@ export const ko: Translations = {
         copied: "전사 내용을 클립보드에 복사했습니다.",
         // 복사 실패 Notice
         copyFailed: "전사 내용을 클립보드에 복사하지 못했습니다.",
+        // 이어하기 세션 구분선 — 같은 노트에 이어 쓸 때 이전/새 구간을 시각적으로 구분한다.
+        sessionDivider: (time: string) => `--- ${time} 이어서 ---`,
     },
     // 사이드바 인라인 컨트롤(언어/모델 선택) 라벨.
     // 설정 탭을 거치지 않고도 빠르게 세션 언어/분석 모델을 바꿀 수 있도록 하는 영역의 i18n.

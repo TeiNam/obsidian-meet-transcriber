@@ -162,6 +162,19 @@ export default class TranscribePlugin extends Plugin {
 	/** 현재 세션이 시작된 시각(ISO 8601). 저장 시 프론트매터에 기록된다. */
 	private sessionStartedAt: string | null = null;
 
+	/**
+	 * 다음 스트리밍이 기존 노트를 "이어서" 작성하는 세션인지 여부.
+	 *
+	 * - `false`(기본): 다음 `startStreaming()` 은 새 세션 — 버퍼/노트/화면을 초기화하고
+	 *   Stop 시 새 노트를 생성한다.
+	 * - `true`: 기존 `currentTranscriptFile` 에 이어 쓰는 세션 — 시작 시 화면/노트 참조를
+	 *   유지하고, Stop 시 이번 세션 발화분을 기존 노트 본문 뒤에 append 한다.
+	 *
+	 * Stop 으로 저장에 성공하면 다음에도 계속 이어갈 수 있도록 `true` 로 유지하며,
+	 * "새 전사" 버튼(`handleNewSessionClick`)을 누르면 `false` 로 리셋된다.
+	 */
+	private continueSession = false;
+
 	/** Bedrock 분석 진행 중 여부. 버튼 정책 입력. */
 	private isAnalyzing = false;
 
@@ -747,7 +760,35 @@ export default class TranscribePlugin extends Plugin {
 		// 새 세션이 아니라 기존 노트 로드이므로 현재 버퍼/세션 시작 시각은 유지하지 않는다.
 		this.transcribeService.clearBuffer();
 		this.sessionStartedAt = null;
+		// 로드한 노트를 다음 Start 부터 이어서 작성한다.
+		this.continueSession = true;
 		this.forEachSidebar((view) => view.loadNoteContent(body));
+		this.refreshSidebarButtons();
+	}
+
+	/**
+	 * "새 전사" 버튼 클릭 핸들러 — 다음 스트리밍을 새 세션으로 초기화한다.
+	 *
+	 * - 스트리밍 중에는 차단(진행 중 세션을 끊지 않도록).
+	 * - 버퍼/노트 참조/화면/세션 시작 시각을 모두 비우고 `continueSession` 을 끈다.
+	 * - 이후 Start 를 누르면 기존 노트를 이어 쓰지 않고 새 노트를 생성한다.
+	 *
+	 * 이전 노트 파일 자체는 vault 에 그대로 남으며, 최근 전사 리스트에서 다시 열 수 있다.
+	 */
+	handleNewSessionClick(): void {
+		if (this.state.getState() === "streaming") {
+			new Notice(
+				this.t.notices.streamingBlockEditAnalyze,
+				NOTICE_DURATION_MS,
+			);
+			return;
+		}
+		this.continueSession = false;
+		this.transcribeService.clearBuffer();
+		this.currentTranscriptFile = null;
+		this.currentNoteBodyLength = 0;
+		this.sessionStartedAt = null;
+		this.forEachSidebar((view) => view.loadNoteContent(""));
 		this.refreshSidebarButtons();
 	}
 
@@ -867,14 +908,27 @@ export default class TranscribePlugin extends Plugin {
 		}
 
 		this.state.dispatch({ type: "START_REQUESTED" });
-		this.sessionStartedAt = new Date().toISOString();
 
-		// 새 세션 전에 이전 버퍼/노트 참조를 정리한다. 이전 노트 파일 자체는
-		// 사용자가 별도로 편집/분석할 수 있도록 vault 에 남겨 둔다.
-		this.transcribeService.clearBuffer();
-		this.currentTranscriptFile = null;
-		this.currentNoteBodyLength = 0;
-		this.forEachSidebar((view) => view.loadNoteContent(""));
+		// 이어하기 세션: 기존 노트가 있을 때만 유효하다. 노트가 없으면(아직 한 번도 저장 안 됨)
+		// 이어할 대상이 없으므로 새 세션으로 강등한다.
+		const isContinuing =
+			this.continueSession && this.currentTranscriptFile !== null;
+
+		if (isContinuing) {
+			// 이어하기: 버퍼/노트 참조/화면을 보존한다. 이번 세션의 발화는 새 버퍼에
+			// 누적되어 Stop 시 기존 노트 본문 뒤에 append 된다. sessionStartedAt 은
+			// 이번 세션(이어 쓰는 구간)의 시작 시각으로 새로 잡는다.
+			this.transcribeService.clearBuffer();
+			this.sessionStartedAt = new Date().toISOString();
+		} else {
+			// 새 세션: 이전 버퍼/노트 참조를 정리한다. 이전 노트 파일 자체는
+			// 사용자가 별도로 편집/분석할 수 있도록 vault 에 남겨 둔다.
+			this.sessionStartedAt = new Date().toISOString();
+			this.transcribeService.clearBuffer();
+			this.currentTranscriptFile = null;
+			this.currentNoteBodyLength = 0;
+			this.forEachSidebar((view) => view.loadNoteContent(""));
+		}
 
 		// 번역 세션 시작 (task 27).
 		this.beginTranslationSession();
@@ -952,6 +1006,9 @@ export default class TranscribePlugin extends Plugin {
 				this.forEachSidebar((view) =>
 					view.setRecentTranscripts(this.getRecentTranscripts()),
 				);
+				// 저장에 성공했으므로 다음 Start 는 이 노트를 이어서 작성한다.
+				// "새 전사" 버튼을 눌러야 새 노트로 분기한다.
+				this.continueSession = true;
 			}
 			this.state.dispatch({ type: "SESSION_CLOSED" });
 		} catch (err) {
@@ -1314,6 +1371,20 @@ export default class TranscribePlugin extends Plugin {
 		// 실패하면 원본만 저장하고 Notice 로 알린다 (사용자가 본문을 잃지 않게).
 		const body = await this.refineIfEnabled(original);
 
+		// 이어하기: 기존 노트가 있으면 새 파일을 만들지 않고 본문 뒤에 구분선과 함께 append.
+		const isContinuing =
+			this.continueSession && this.currentTranscriptFile !== null;
+		if (isContinuing && this.currentTranscriptFile !== null) {
+			const file = this.currentTranscriptFile;
+			const existingBody = await this.noteStore.readTranscriptBody(file);
+			const divider = this.t.ui.sessionDivider(formatSessionTime(new Date()));
+			const combined = `${existingBody.replace(/\s+$/, "")}\n\n${divider}\n\n${body}`;
+			await this.noteStore.overwriteTranscript(file, combined);
+			this.transcribeService.clearBuffer();
+			this.sessionStartedAt = null;
+			return file;
+		}
+
 		const meta: TranscriptNoteMeta = {
 			startedAt: this.sessionStartedAt ?? new Date().toISOString(),
 			endedAt: new Date().toISOString(),
@@ -1477,4 +1548,15 @@ export default class TranscribePlugin extends Plugin {
 		);
 	}
 
+}
+
+/**
+ * 이어하기 세션 구분선에 쓸 시각을 `HH:mm` 형식으로 포맷한다.
+ *
+ * 로컬 타임존 기준 24시간 표기. `Intl` 의존을 피하고 결정적 출력을 위해 직접 패딩한다.
+ */
+function formatSessionTime(date: Date): string {
+	const hh = String(date.getHours()).padStart(2, "0");
+	const mm = String(date.getMinutes()).padStart(2, "0");
+	return `${hh}:${mm}`;
 }

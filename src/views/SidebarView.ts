@@ -96,6 +96,9 @@ export interface TranscribePluginLike {
 
 	/** 시작/중지 버튼 클릭 핸들러. */
 	handleStartStopClick(): void | Promise<void>;
+
+	/** "새 전사" 버튼 클릭 핸들러. 다음 스트리밍을 새 세션으로 초기화한다. */
+	handleNewSessionClick(): void | Promise<void>;
 	/** 편집 버튼 클릭 핸들러. 플러그인이 `view.enterEditMode()`를 호출한다. */
 	handleEditClick(): void;
 	/** 분석 버튼 클릭 핸들러. */
@@ -206,6 +209,7 @@ export class SidebarView extends ItemView {
 	private stateLabelEl: HTMLSpanElement | null = null;
 	private reconnectLabelEl: HTMLSpanElement | null = null;
 	private startStopBtn: HTMLButtonElement | null = null;
+	private newSessionBtn: HTMLButtonElement | null = null;
 	private editBtn: HTMLButtonElement | null = null;
 	private analyzeBtn: HTMLButtonElement | null = null;
 	private copyBtn: HTMLButtonElement | null = null;
@@ -540,6 +544,12 @@ export class SidebarView extends ItemView {
 		this.analyzeBtn.disabled = !states.analyze.enabled;
 		this.analyzeBtn.setText(this.plugin.t.buttons.analyze);
 
+		// 새 전사(초기화) 버튼: 이어할 대상이 있고 스트리밍/분석/편집 중이 아닐 때만 활성.
+		if (this.newSessionBtn) {
+			this.newSessionBtn.disabled = !states.newSession.enabled;
+			this.newSessionBtn.setText(this.plugin.t.buttons.newSession);
+		}
+
 		// 복사 아이콘: 전사 보드 내부에 플로팅. 본문이 있고 편집/분석 중이 아닐 때만 활성.
 		// 편집 모드에서는 텍스트 보드 자체가 textarea 로 대체되므로 이 아이콘은 DOM 에서 사라져 있다.
 		if (this.copyBtn) {
@@ -726,6 +736,10 @@ export class SidebarView extends ItemView {
 			cls: "start-stop-btn",
 			text: this.plugin.t.buttons.start,
 		});
+		this.newSessionBtn = controls.createEl("button", {
+			cls: "new-session-btn",
+			text: this.plugin.t.buttons.newSession,
+		});
 		this.editBtn = controls.createEl("button", {
 			cls: "edit-btn",
 			text: this.plugin.t.buttons.edit,
@@ -735,12 +749,16 @@ export class SidebarView extends ItemView {
 			text: this.plugin.t.buttons.analyze,
 		});
 
-		// 초기 상태에서 편집/분석은 비활성. refreshButtons()가 정확한 상태를 덮어쓴다.
+		// 초기 상태에서 편집/분석/새 전사는 비활성. refreshButtons()가 정확한 상태를 덮어쓴다.
 		this.editBtn.disabled = true;
 		this.analyzeBtn.disabled = true;
+		this.newSessionBtn.disabled = true;
 
 		this.plugin.registerDomEvent(this.startStopBtn, "click", () => {
 			void this.plugin.handleStartStopClick();
+		});
+		this.plugin.registerDomEvent(this.newSessionBtn, "click", () => {
+			void this.plugin.handleNewSessionClick();
 		});
 		this.plugin.registerDomEvent(this.editBtn, "click", () => {
 			this.plugin.handleEditClick();
@@ -974,6 +992,7 @@ export class SidebarView extends ItemView {
 		this.stateLabelEl = null;
 		this.reconnectLabelEl = null;
 		this.startStopBtn = null;
+		this.newSessionBtn = null;
 		this.editBtn = null;
 		this.analyzeBtn = null;
 		this.copyBtn = null;

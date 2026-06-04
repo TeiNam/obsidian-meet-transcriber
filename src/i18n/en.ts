@@ -21,6 +21,7 @@ export const en = {
         copy: "Copy",
         save: "Save",
         cancel: "Cancel",
+        newSession: "New transcript",
     },
     states: {
         idle: "Idle",
@@ -44,6 +45,8 @@ export const en = {
         copied: "Transcript copied to clipboard.",
         // 복사 실패 Notice
         copyFailed: "Failed to copy transcript to clipboard.",
+        // 이어하기 세션 구분선 — 같은 노트에 이어 쓸 때 이전/새 구간을 시각적으로 구분한다.
+        sessionDivider: (time: string) => `--- Resumed at ${time} ---`,
     },
     // 사이드바 인라인 컨트롤(언어/모델 선택) 라벨.
     // 설정 탭을 거치지 않고도 빠르게 세션 언어/분석 모델을 바꿀 수 있도록 하는 영역의 i18n.

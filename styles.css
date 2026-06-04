@@ -150,14 +150,16 @@
 
 /* 편집/분석 버튼 — 보조 액션으로 기본 배경 사용 */
 .edit-btn,
-.analyze-btn {
+.analyze-btn,
+.new-session-btn {
     background: var(--interactive-normal);
     color: var(--text-normal);
     border: 1px solid var(--background-modifier-border);
 }
 
 .edit-btn:hover:not(:disabled),
-.analyze-btn:hover:not(:disabled) {
+.analyze-btn:hover:not(:disabled),
+.new-session-btn:hover:not(:disabled) {
     background: var(--interactive-hover);
 }
 
