@@ -110,12 +110,5 @@ export function mergeWithDefaults(
 		base.audioInputDeviceId = "";
 	}
 
-	if (typeof base.refineEnabled !== "boolean") {
-		base.refineEnabled = false;
-	}
-	if (typeof base.refinementInstruction !== "string") {
-		base.refinementInstruction = "";
-	}
-
 	return base;
 }

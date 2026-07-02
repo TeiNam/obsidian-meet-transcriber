@@ -224,30 +224,6 @@ export interface TranscribeSettings {
 	translationOutputFormat: Translation_Output_Format;
 
 	/**
-	 * 노트 저장 직전 Bedrock 모델로 전사 본문을 **교정**할지 여부.
-	 *
-	 * `true` 면 `saveBufferAsTranscript` 가 `BedrockService.refineTranscript` 를 호출해
-	 * 맞춤법·띄어쓰기·문장부호만 다듬은 교정본을 만든 뒤, 노트에 `## 교정본` 과
-	 * `## 원본` 두 섹션으로 모두 기록한다 (원본 보존 정책).
-	 *
-	 * 기본값 `false`. 자격 증명 / 모델 / 리전이 비어 있으면 토글이 켜져 있어도
-	 * 교정 단계는 건너뛰고 원본만 저장한다.
-	 */
-	refineEnabled: boolean;
-
-	/**
-	 * 교정 모델에 전달할 추가 지시문(선택, 자유 입력).
-	 *
-	 * 비어 있으면 기본 프롬프트(맞춤법·띄어쓰기·문장부호만)만 사용한다. 값이 있으면
-	 * 프롬프트 하단에 `--- additional instructions ---` 블록으로 삽입되어 모델이
-	 * 추가 컨텍스트(예: "회사명 'Obsidian' 표기 유지", "존댓말로 통일") 를 반영한다.
-	 *
-	 * 단, 시스템 프롬프트는 어떤 경우에도 단어 변경/요약/의역을 금지하므로
-	 * 사용자가 의역 지시를 적어도 모델은 표면 표기 교정 범위를 벗어나지 않는다.
-	 */
-	refinementInstruction: string;
-
-	/**
 	 * 사용할 마이크(오디오 입력 장치) `MediaDeviceInfo.deviceId`.
 	 *
 	 * 빈 문자열이면 OS / 브라우저의 기본 입력 장치를 사용한다(기존 동작).
@@ -281,7 +257,5 @@ export const DEFAULT_SETTINGS: TranscribeSettings = {
 	translationEnabled: false,
 	translationTargetLanguage: "en",
 	translationOutputFormat: "inline",
-	refineEnabled: false,
-	refinementInstruction: "",
 	audioInputDeviceId: "",
 };

@@ -182,13 +182,11 @@ export class TranscribeSettingTab extends PluginSettingTab {
 			.setHeading();
 		this.renderTranscribeVocabularyNameField(containerEl, t);
 
-		// (6) Output 섹션 — 문장 타임스탬프 + AI 교정.
+		// (6) Output 섹션 — 문장 타임스탬프.
 		new Setting(containerEl)
 			.setName(t.settings.outputHeading)
 			.setHeading();
 		this.renderTimestampOutputToggle(containerEl, t);
-		this.renderRefineEnabledToggle(containerEl, t);
-		this.renderRefinementInstructionField(containerEl, t);
 
 		// (7) About 섹션 — 자격 증명 저장 위치 보안 고지.
 		new Setting(containerEl)
@@ -617,54 +615,6 @@ export class TranscribeSettingTab extends PluginSettingTab {
 				tg.setValue(this.transcribePlugin.settings.timestampOutputEnabled);
 				tg.onChange(async (value) => {
 					this.transcribePlugin.settings.timestampOutputEnabled = value;
-					await this.saveIfValid();
-				});
-			});
-	}
-
-	/**
-	 * AI 교정 활성 토글.
-	 *
-	 * `true` 면 `saveBufferAsTranscript` 가 노트 저장 직전에 `BedrockService.refineTranscript`
-	 * 를 호출하여 본문의 맞춤법·띄어쓰기·문장부호만 교정한다. 노트에는 교정본과 원본이
-	 * 두 섹션으로 모두 기록된다(원본 보존 정책).
-	 */
-	private renderRefineEnabledToggle(
-		containerEl: HTMLElement,
-		t: Translations,
-	): void {
-		new Setting(containerEl)
-			.setName(t.settings.refine.enabled.name)
-			.setDesc(t.settings.refine.enabled.desc)
-			.addToggle((tg) => {
-				tg.setValue(this.transcribePlugin.settings.refineEnabled);
-				tg.onChange(async (value) => {
-					this.transcribePlugin.settings.refineEnabled = value;
-					await this.saveIfValid();
-				});
-			});
-	}
-
-	/**
-	 * AI 교정 자유 입력 지시문(textarea).
-	 *
-	 * 시스템 프롬프트의 엄격 규칙은 사용자 입력과 무관하게 항상 적용되므로
-	 * 사용자가 의역/요약 지시를 적어도 모델은 표면 표기 교정 범위를 벗어나지 않는다.
-	 */
-	private renderRefinementInstructionField(
-		containerEl: HTMLElement,
-		t: Translations,
-	): void {
-		new Setting(containerEl)
-			.setName(t.settings.refine.instruction.name)
-			.setDesc(t.settings.refine.instruction.desc)
-			.addTextArea((ta) => {
-				ta.inputEl.rows = 4;
-				ta.inputEl.classList.add("transcribe-glossary-textarea");
-				ta.setPlaceholder(t.settings.refine.instruction.placeholder);
-				ta.setValue(this.transcribePlugin.settings.refinementInstruction);
-				ta.onChange(async (value) => {
-					this.transcribePlugin.settings.refinementInstruction = value;
 					await this.saveIfValid();
 				});
 			});

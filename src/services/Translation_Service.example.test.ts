@@ -149,9 +149,9 @@ describe("Translation_Service.enqueue — AC 13.4: Final 1 건당 1 회 호출",
 		expect(sentInput.TargetLanguageCode).toBe("en");
 		expect(sentInput.Text).toBe("안녕");
 
-		// (3) onResolved 가 정확히 1 회, segmentId 1 + "Hello" 인자로 호출됨.
+		// (3) onResolved 가 정확히 1 회, segmentId 1 + "Hello" + placeholderEl 인자로 호출됨.
 		expect(onResolved).toHaveBeenCalledTimes(1);
-		expect(onResolved).toHaveBeenCalledWith(1, "Hello");
+		expect(onResolved).toHaveBeenCalledWith(1, "Hello", item.placeholderEl);
 		expect(onRejected).not.toHaveBeenCalled();
 
 		// (4) cost counter: "안녕" = 2 codepoints.

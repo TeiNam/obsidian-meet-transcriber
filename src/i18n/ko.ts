@@ -38,6 +38,8 @@ export const ko: Translations = {
         empty: "전사된 내용이 없습니다.",
         // Bedrock 분석 진행 중 스피너 레이블 (Requirement 6.6)
         analyzing: "분석 중...",
+        // 중지 후 노트 저장 중 스피너 레이블
+        saving: "저장 중...",
         // 편집 모드 빈 내용 안내
         editorEmpty: "편집할 내용이 없습니다.",
         // 복사 성공 Notice
@@ -155,18 +157,6 @@ export const ko: Translations = {
                 },
             },
         },
-        // AI 교정 섹션 — Bedrock 모델로 노트 저장 직전 본문 표면 표기를 다듬는다.
-        refine: {
-            enabled: {
-                name: "저장 시 AI 교정",
-                desc: "노트로 저장하기 직전에 분석 모델로 맞춤법·띄어쓰기·문장부호만 교정합니다. 노트에는 교정본과 원본이 모두 함께 저장됩니다.",
-            },
-            instruction: {
-                name: "교정 지시사항",
-                desc: "교정 프롬프트에 덧붙일 자유 입력 지시문(선택). '단어 변경 금지·의역 금지' 같은 엄격한 규칙은 사용자 입력과 무관하게 항상 적용됩니다.",
-                placeholder: "예시)\n'Obsidian' 같은 브랜드명은 표기 유지\n전체적으로 존댓말로 통일",
-            },
-        },
     },
     notices: {
         // 마이크 권한 거부 (Requirement 3.9)
@@ -224,13 +214,11 @@ export const ko: Translations = {
         translationFailedSingle: "(번역 실패)",
         translationAutoDisabled:
             "반복된 실패로 번역이 자동 비활성화되었습니다.",
-
-        // AI 교정 실패 — 원본 그대로 저장됨을 알림.
-        refineFailed:
-            "AI 교정에 실패했습니다. 원본 전사가 그대로 저장되었습니다.",
     },
-    // 콜아웃 섹션 제목. 노트 본문은 분석(summary) → 원본(quote) → 교정본(tip)
-    // 순서의 콜아웃 구조로 고정 기록된다. `## ` prefix 없이 제목 텍스트만 둔다.
+    // 콜아웃 섹션 제목. 노트 본문은 분석(summary) → 원본(quote) 순서의 콜아웃
+    // 구조로 고정 기록된다. `## ` prefix 없이 제목 텍스트만 둔다.
+    // `refinedHeader`는 AI 교정 기능 제거 후에도 과거에 생성된 노트의 `tip`
+    // 콜아웃을 이어쓰기(재직렬화) 할 때 제목을 유지하기 위해 남아 있다.
     analysisHeader: "분석 결과",
     refinedHeader: "교정본",
     originalHeader: "원본",

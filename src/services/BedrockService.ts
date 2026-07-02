@@ -25,10 +25,6 @@ import {
 import { TranscribeError } from "../types/errors";
 import type { AwsCredentials } from "../types/settings";
 import type { SupportedLocale } from "../i18n";
-import {
-	splitTranscriptIntoChunks,
-	joinRefinedChunks,
-} from "./refineChunking";
 
 /**
  * 본문 길이 한계. 초과 시 요청을 개시하지 않는다(Requirements 6.5).
@@ -61,30 +57,9 @@ const MAX_TRANSCRIPT_LENGTH = 200_000;
 const DEFAULT_TIMEOUT_MS = 60_000;
 
 /**
- * Claude 계열 요청 본문의 `max_tokens` 값.
- *
- * 분석(analyze)은 출력이 짧으므로 이 값으로 충분하다. 교정(refine)은 입력 본문을
- * 거의 같은 길이로 되돌려야 하므로 별도의 더 큰 상한(`REFINE_MAX_TOKENS`)을 쓴다.
+ * Claude 계열 요청 본문의 `max_tokens` 값. 분석(analyze)은 출력이 짧으므로 충분하다.
  */
 const CLAUDE_MAX_TOKENS = 8192;
-
-/**
- * `refineTranscript` 단일 호출의 `max_tokens` 값.
- *
- * 교정은 입력≈출력 작업이라 출력 토큰이 부족하면 교정본이 중간에서 잘린다(원본은
- * 모델을 거치지 않아 영향 없음). 청크 크기(`REFINE_CHUNK_CHAR_LIMIT`)를 이 출력
- * 한도 안에 들어오도록 잡아 한 청크가 절대 잘리지 않게 한다.
- */
-const REFINE_MAX_TOKENS = 8192;
-
-/**
- * `refineTranscript` 청크 분할의 문자 수 임계치.
- *
- * 한국어 기준 대략 1토큰 ≈ 1.5~2자이므로 8192 출력 토큰이면 안전하게 약 1만 자까지
- * 담을 수 있다. 프롬프트/오버헤드와 모델별 편차를 감안해 보수적으로 6,000자로 잡고,
- * 이를 넘는 전사는 줄 경계 기준으로 여러 청크로 나눠 순차 교정한다.
- */
-const REFINE_CHUNK_CHAR_LIMIT = 6_000;
 
 /**
  * Anthropic on Bedrock 요청 스키마 버전 식별자.
@@ -184,60 +159,6 @@ const PROMPT_BY_LOCALE: Record<SupportedLocale, string> = {
 		"## 참고 사항\n" +
 		"후속 회의 일정, 미결 이슈, 파킹랏 항목 등. 없으면 이 섹션을 생략합니다.",
 };
-
-/**
- * `refineTranscript` 의 시스템 프롬프트(locale 별).
- *
- * 핵심 제약 (사용자 결정 "맞춤법·띄어쓰기만"):
- * - 단어 변경 / 요약 / 의역 / 추가 / 삭제 절대 금지.
- * - `[mm:ss]` 또는 `[hh:mm:ss]` 타임스탬프 prefix 와 `Speaker N:` 라벨은 **그대로** 보존.
- * - 라인 수 / 라인 순서 변경 금지 (라운드트립 호환을 위해).
- * - 출력은 본문만 — 어떤 머리글, 설명, 코드펜스도 붙이지 말 것.
- */
-const REFINE_SYSTEM_PROMPT_BY_LOCALE: Record<SupportedLocale, string> = {
-	en:
-		"You are a transcript proofreader. The user will give you a raw speech-to-text transcript. " +
-		"Your only job is to fix obvious spelling, spacing, and punctuation errors line by line.\n\n" +
-		"STRICT RULES (must obey):\n" +
-		"1. Do NOT change words. No paraphrasing, no summarizing, no translation, no synonym swaps.\n" +
-		"2. Do NOT add or remove content. The number of lines and the order of lines must stay identical.\n" +
-		"3. Preserve every `[mm:ss]` or `[hh:mm:ss]` timestamp prefix and every `Speaker N:` label exactly as given.\n" +
-		"4. Preserve any indented translation lines starting with two spaces and `→` exactly as given.\n" +
-		"5. Output ONLY the corrected transcript text. No headings, no explanation, no code fences.\n" +
-		"6. If a line is already clean, output it unchanged.",
-	ko:
-		"당신은 회의 전사(STT) 본문을 다듬는 교정자입니다. 사용자가 음성 인식 원문을 줄 것이고, " +
-		"당신은 라인별로 명백한 맞춤법 / 띄어쓰기 / 문장부호 오류만 바로잡습니다.\n\n" +
-		"엄격한 규칙(반드시 지킬 것):\n" +
-		"1. 단어를 바꾸지 마세요. 의역, 요약, 동의어 치환, 번역 금지.\n" +
-		"2. 내용을 추가하거나 삭제하지 마세요. 라인 수와 라인 순서는 입력과 완전히 동일해야 합니다.\n" +
-		"3. `[mm:ss]` 또는 `[hh:mm:ss]` 타임스탬프 prefix 와 `Speaker N:` 라벨은 입력 그대로 보존하세요.\n" +
-		"4. 두 칸 들여쓴 `  → ...` 형태의 번역 라인이 있다면 그대로 보존하세요.\n" +
-		"5. 결과는 교정된 전사 본문만 출력합니다. 머리글, 설명, 코드펜스 모두 붙이지 마세요.\n" +
-		"6. 이미 정상인 라인은 그대로 출력하세요.",
-};
-
-/**
- * `RefineParams` — `BedrockService.refineTranscript` 매개변수.
- *
- * `AnalyzeParams` 와 거의 동일하지만 `glossary` 대신 `userInstruction` 을 받는다.
- * `userInstruction` 은 사용자가 설정 UI 의 textarea 에 자유 입력한 추가 지시문이며,
- * 비어 있으면 시스템 프롬프트만으로 교정을 수행한다.
- */
-export interface RefineParams {
-	credentials: AwsCredentials;
-	region: string;
-	modelId: string;
-	/** 교정 대상 전사 본문(이미 `Sentence_Formatter.format` 으로 직렬화된 결과). */
-	transcript: string;
-	timeoutMs?: number;
-	locale: SupportedLocale;
-	/**
-	 * 사용자 자유 입력 지시문(선택). 예: "회사명 'Obsidian' 표기 유지". 비어 있으면 무시한다.
-	 * 시스템 프롬프트의 엄격 규칙(단어 변경 금지 등)은 이 값과 무관하게 항상 적용된다.
-	 */
-	userInstruction?: string;
-}
 
 /**
  * 주어진 locale 과 전사 본문(+ 선택적 용어 사전) 을 결합해 Claude 3 에 전달할 user 메시지를 구성한다.
@@ -466,171 +387,6 @@ export class BedrockService {
 			);
 		} finally {
 			// 타임아웃 타이머가 아직 유효하다면 해제하여 이벤트 루프 보류를 막는다.
-			clearTimeout(timer);
-		}
-	}
-
-	/**
-	 * 이미 직렬화된 전사 본문을 Claude 모델로 **교정**한다 (맞춤법·띄어쓰기·문장부호만).
-	 *
-	 * `analyze` 와 동일한 InvokeModel 패턴을 따르지만, 본문을 요약하지 않고
-	 * 라인별 표면 표기만 다듬는다. 시스템 프롬프트가 단어 변경 / 의역 / 요약을
-	 * 금지하므로 사용자 자유 입력(`userInstruction`) 이 의역을 요청해도
-	 * 모델은 표면 표기 교정 범위를 벗어나지 않는다.
-	 *
-	 * 길이 제한(`MAX_TRANSCRIPT_LENGTH`), 타임아웃(`AbortController`),
-	 * 에러 분류(`AWS_AUTH` / `AWS_MODEL_UNAVAILABLE` / `AWS_NETWORK`) 정책은
-	 * `analyze` 와 동일하다.
-	 *
-	 * @returns 교정된 전사 본문 문자열. 모델이 빈 응답을 주면 빈 문자열.
-	 *          호출부는 빈 결과를 받으면 원본을 그대로 사용해야 한다.
-	 */
-	async refineTranscript(params: RefineParams): Promise<string> {
-		const {
-			credentials,
-			region,
-			modelId,
-			transcript,
-			timeoutMs = DEFAULT_TIMEOUT_MS,
-			locale,
-			userInstruction,
-		} = params;
-
-		if (transcript.length > MAX_TRANSCRIPT_LENGTH) {
-			throw new TranscribeError(
-				`Transcript length ${transcript.length} exceeds the ${MAX_TRANSCRIPT_LENGTH}-character limit.`,
-				"TRANSCRIPT_TOO_LONG",
-			);
-		}
-
-		// 긴 회의는 출력 토큰 한도에 막혀 한 번에 교정하면 잘린다. 줄 경계로 청크를
-		// 나눠 각각 교정한 뒤 합친다. 짧은 전사는 청크가 1개라 단일 호출과 동일하다.
-		const chunks = splitTranscriptIntoChunks(transcript, REFINE_CHUNK_CHAR_LIMIT);
-		if (chunks.length === 0) {
-			return "";
-		}
-
-		const client = this.clientFactory(credentials, region);
-		const refinedChunks: string[] = [];
-
-		for (const chunk of chunks) {
-			const refined = await this.refineChunk(client, {
-				chunk,
-				modelId,
-				timeoutMs,
-				locale,
-				userInstruction,
-			});
-			// 청크 교정이 빈 결과면(일시적 실패/빈 응답) 해당 청크만 원본을 유지해
-			// 전체 본문을 잃지 않는다 (부분 실패 격리).
-			refinedChunks.push(refined.trim().length > 0 ? refined : chunk);
-		}
-
-		return joinRefinedChunks(refinedChunks);
-	}
-
-	/**
-	 * 단일 전사 청크를 Bedrock 으로 교정한다(`refineTranscript` 내부 헬퍼).
-	 *
-	 * 자격 증명/모델 오류(`AWS_AUTH` / `AWS_MODEL_UNAVAILABLE`)는 재시도해도
-	 * 의미가 없으므로 그대로 throw 하여 전체 교정을 즉시 중단시킨다. 네트워크/타임아웃
-	 * 등 일시적 오류는 빈 문자열을 반환해 호출부가 해당 청크를 원본으로 대체하게 한다.
-	 *
-	 * @returns 교정된 청크 텍스트. 일시적 실패 시 빈 문자열.
-	 */
-	private async refineChunk(
-		client: BedrockRuntimeClient,
-		args: {
-			chunk: string;
-			modelId: string;
-			timeoutMs: number;
-			locale: SupportedLocale;
-			userInstruction?: string;
-		},
-	): Promise<string> {
-		const { chunk, modelId, timeoutMs, locale, userInstruction } = args;
-
-		const systemPrompt = REFINE_SYSTEM_PROMPT_BY_LOCALE[locale];
-		const trimmedInstruction = userInstruction?.trim() ?? "";
-		const userPrefix =
-			trimmedInstruction.length > 0
-				? `--- additional instructions ---\n${trimmedInstruction}\n--- end additional instructions ---\n\n`
-				: "";
-		const userMessage = `${userPrefix}--- transcript start ---\n${chunk}\n--- transcript end ---`;
-
-		const requestJson = JSON.stringify({
-			anthropic_version: ANTHROPIC_VERSION,
-			max_tokens: REFINE_MAX_TOKENS,
-			system: systemPrompt,
-			messages: [
-				{
-					role: "user",
-					content: userMessage,
-				},
-			],
-		});
-		const bodyBytes = new TextEncoder().encode(requestJson);
-
-		const command = new InvokeModelCommand({
-			modelId,
-			contentType: "application/json",
-			accept: "application/json",
-			body: bodyBytes,
-		});
-
-		const controller = new AbortController();
-		let timedOut = false;
-		const timer = setTimeout(() => {
-			timedOut = true;
-			controller.abort();
-		}, timeoutMs);
-
-		try {
-			const response = await client.send(command, {
-				abortSignal: controller.signal,
-			});
-			return extractClaudeText(response.body);
-		} catch (err) {
-			if (err instanceof TranscribeError) {
-				throw err;
-			}
-
-			const name = getErrorName(err);
-
-			// 자격 증명/모델 오류는 재시도 무의미 — 즉시 전파해 전체 교정을 중단한다.
-			if (name === "AccessDeniedException" || name === "UnrecognizedClientException") {
-				console.error("[BedrockService.refine] auth error:", name);
-				throw new TranscribeError(
-					"Bedrock authentication failed.",
-					"AWS_AUTH",
-					err,
-				);
-			}
-
-			if (name === "ValidationException") {
-				console.error("[BedrockService.refine] model unavailable:", name);
-				throw new TranscribeError(
-					"Bedrock model is not available in the configured region.",
-					"AWS_MODEL_UNAVAILABLE",
-					err,
-				);
-			}
-
-			// 네트워크/타임아웃 등 일시적 오류는 빈 문자열을 반환해 호출부가
-			// 해당 청크를 원본으로 대체하도록 한다(부분 실패 격리).
-			if (isAbortError(err)) {
-				const reason = timedOut
-					? `Bedrock request timed out after ${timeoutMs} ms.`
-					: "Bedrock request was aborted.";
-				console.error("[BedrockService.refine] chunk aborted:", reason);
-			} else {
-				console.error(
-					"[BedrockService.refine] chunk network/unknown error:",
-					name || "unknown",
-				);
-			}
-			return "";
-		} finally {
 			clearTimeout(timer);
 		}
 	}

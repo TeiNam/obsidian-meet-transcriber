@@ -500,6 +500,52 @@ describe("SidebarView — 분석 스피너 (Requirements 6.6, 6.16)", () => {
 	});
 });
 
+describe("SidebarView — 저장 중 스피너 (Stop 이후 레이스 컨디션 방지)", () => {
+	it("showSavingSpinner(true)는 '저장 중...' 텍스트를 노출하고 시작/편집/분석 버튼을 잠근다", async () => {
+		const plugin = createFakePlugin("ko", {
+			hasTranscriptNote: true,
+			transcriptLength: 100,
+			hasCredentials: true,
+			hasBedrockModel: true,
+		});
+		const view = await mountView(plugin);
+
+		view.showSavingSpinner(true);
+
+		const spinner = q(view.contentEl, ".transcribe-spinner");
+		expect(spinner.classList.contains("is-hidden")).toBe(false);
+		expect(spinner.textContent).toBe(plugin.t.ui.saving);
+
+		// showAnalyzeSpinner 와 동일한 게이트(isAnalyzing)를 재사용하므로 세 버튼 모두 잠긴다 —
+		// Stop 직후 저장이 끝나기 전에 사용자가 Start 를 다시 눌러 세션이 꼬이는 것을 막는다.
+		expect(
+			q<HTMLButtonElement>(view.contentEl, ".start-stop-btn").disabled,
+		).toBe(true);
+		expect(q<HTMLButtonElement>(view.contentEl, ".edit-btn").disabled).toBe(
+			true,
+		);
+		expect(q<HTMLButtonElement>(view.contentEl, ".analyze-btn").disabled).toBe(
+			true,
+		);
+	});
+
+	it("showSavingSpinner(false) 이후 showAnalyzeSpinner(true) 는 '분석 중...' 텍스트로 되돌린다", async () => {
+		const plugin = createFakePlugin("ko");
+		const view = await mountView(plugin);
+
+		view.showSavingSpinner(true);
+		view.showSavingSpinner(false);
+		expect(
+			q(view.contentEl, ".transcribe-spinner").classList.contains("is-hidden"),
+		).toBe(true);
+
+		view.showAnalyzeSpinner(true);
+		const spinner = q(view.contentEl, ".transcribe-spinner");
+		expect(spinner.classList.contains("is-hidden")).toBe(false);
+		expect(spinner.textContent).toBe(plugin.t.ui.analyzing);
+	});
+});
+
 describe("SidebarView — 클릭 이벤트 (registerDomEvent)", () => {
 	it("시작 버튼 클릭은 handleStartStopClick으로 라우팅된다", async () => {
 		const plugin = createFakePlugin("en");

@@ -73,6 +73,18 @@ export class TranscriptBuffer {
 	private pendingPartial: string = "";
 
 	/**
+	 * `getCommittedText().length`와 항상 동일한 값을 유지하는 누적 캐시.
+	 *
+	 * `appendFinal`마다 O(1)로 갱신된다. 이 캐시가 없으면 `length()`가 매번
+	 * `chunks.join(" ")`로 전체 본문을 재조립해야 하는데, 실시간 스트리밍 중
+	 * `length()`는 Final 결과마다(버튼 상태 재계산 경로로) 반복 호출되므로
+	 * 세션이 길어질수록(청크 수 증가) 호출 1회당 비용도 함께 증가해 회의
+	 * 전체로는 O(n²)가 된다. 긴 회의(1시간 이상)에서 체감되는 "갈수록 느려짐"의
+	 * 원인이 이 부분이었다.
+	 */
+	private committedLength = 0;
+
+	/**
 	 * v1.1 확장: 구조화된 `Transcript_Segment` 시퀀스 (design §4.7).
 	 *
 	 * `appendSegment(s)` 가 push 만 수행하므로 호출 순서가 그대로 보존된다. 호출자는
@@ -91,7 +103,10 @@ export class TranscriptBuffer {
 	 * Requirements 3.6, 3.7.
 	 */
 	appendFinal(text: string): void {
+		// join(" ") 은 이미 청크가 1개 이상 있을 때만 구분자 1글자를 추가한다.
+		const hadChunks = this.chunks.length > 0;
 		this.chunks.push(text);
+		this.committedLength += text.length + (hadChunks ? 1 : 0);
 		this.pendingPartial = "";
 	}
 
@@ -176,11 +191,12 @@ export class TranscriptBuffer {
 	 * 확정 텍스트의 문자 길이.
 	 *
 	 * 불변식: `length() === getCommittedText().length`. Partial 길이는 포함되지 않는다.
+	 * `committedLength` 캐시를 반환하므로 O(1)이다(청크 수와 무관).
 	 *
 	 * @returns 확정 텍스트의 길이.
 	 */
 	length(): number {
-		return this.getCommittedText().length;
+		return this.committedLength;
 	}
 
 	/**
@@ -193,6 +209,7 @@ export class TranscriptBuffer {
 		this.chunks = [];
 		this.pendingPartial = "";
 		this.segments = [];
+		this.committedLength = 0;
 	}
 
 	/**

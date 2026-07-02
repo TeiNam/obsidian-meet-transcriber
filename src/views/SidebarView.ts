@@ -465,6 +465,27 @@ export class SidebarView extends ItemView {
 	showAnalyzeSpinner(visible: boolean): void {
 		this.isAnalyzing = visible;
 		if (this.spinnerEl) {
+			this.spinnerEl.setText(this.plugin.t.ui.analyzing);
+			this.spinnerEl.toggleClass("is-hidden", !visible);
+		}
+		this.refreshButtons();
+	}
+
+	/**
+	 * 중지 후 노트 저장이 진행되는 동안 스피너를 노출하고 버튼을 잠근다.
+	 *
+	 * `handleStartStopClick`이 Stop 을 트리거하면 `stopStreaming()` 이 세션 종료 신호
+	 * 전송 → 노트 저장(파일 I/O) 순으로 진행되는데, 이 구간에는 `isAnalyzing` 과
+	 * 별도의 UI 피드백이 없어 사용자가 "멈췄다"고 오인해 Start 를 다시 눌러버릴 수 있다.
+	 * 그 경우 저장이 끝나며 새로 시작된 세션의 `currentTranscriptFile`/화면 상태를
+	 * 조용히 덮어쓰는 레이스 컨디션이 발생한다. `isAnalyzing` 게이트(분석/편집/시작
+	 * 버튼을 모두 잠그는 동일 정책)를 재사용해 저장 중에도 버튼을 잠그고, 스피너
+	 * 텍스트만 "저장 중..."으로 바꿔 사용자에게 무엇을 기다리는지 알린다.
+	 */
+	showSavingSpinner(visible: boolean): void {
+		this.isAnalyzing = visible;
+		if (this.spinnerEl) {
+			this.spinnerEl.setText(this.plugin.t.ui.saving);
 			this.spinnerEl.toggleClass("is-hidden", !visible);
 		}
 		this.refreshButtons();

@@ -112,8 +112,6 @@ describe("SettingsStore.load — 기본값 머지 (Requirement 2.11)", () => {
 			translationEnabled: false,
 			translationTargetLanguage: "en",
 			translationOutputFormat: "inline",
-			refineEnabled: false,
-			refinementInstruction: "",
 		};
 		fakePlugin.loadData.mockResolvedValue(saved);
 
@@ -167,8 +165,6 @@ describe("SettingsStore.save — 저장 위임 및 에러 전파 (Requirement 2.
 		translationEnabled: false,
 		translationTargetLanguage: "en",
 		translationOutputFormat: "inline",
-		refineEnabled: false,
-		refinementInstruction: "",
 	};
 
 	beforeEach(() => {

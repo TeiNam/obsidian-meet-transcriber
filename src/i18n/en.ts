@@ -35,6 +35,8 @@ export const en = {
         empty: "No transcript available.",
         // Bedrock 분석 진행 중 스피너 레이블 (Requirement 6.6)
         analyzing: "Analyzing...",
+        // 중지 후 노트 저장 중 스피너 레이블
+        saving: "Saving...",
         // 편집 모드 빈 내용 안내
         editorEmpty: "No content to edit.",
         // 복사 성공 Notice
@@ -154,19 +156,6 @@ export const en = {
                 },
             },
         },
-        // AI 교정 섹션 — Bedrock 모델로 노트 저장 직전 본문 표면 표기를 다듬는다.
-        // 사용자 결정: "자동 + 원본 보존", "맞춤법·띄어쓰기만".
-        refine: {
-            enabled: {
-                name: "AI proofreading on save",
-                desc: "Run the analysis model right before saving to fix spelling, spacing, and punctuation only. The note keeps both the refined and the original transcript.",
-            },
-            instruction: {
-                name: "Proofreading instructions",
-                desc: "Optional free-text instructions appended to the proofreading prompt. The strict 'no word changes / no paraphrasing' rules always apply.",
-                placeholder: "e.g.\nKeep brand names like 'Obsidian' as written.\nUse formal Korean consistently.",
-            },
-        },
     },
     notices: {
         // 마이크 권한 거부 (Requirement 3.9)
@@ -224,13 +213,11 @@ export const en = {
         translationFailedSingle: "(translation failed)",
         translationAutoDisabled:
             "Translation auto-disabled after repeated failures.",
-
-        // AI 교정 실패 — 원본 그대로 저장됨을 알림.
-        refineFailed:
-            "AI proofreading failed. The original transcript was saved.",
     },
-    // 콜아웃 섹션 제목. 노트 본문은 분석(summary) → 원본(quote) → 교정본(tip)
-    // 순서의 콜아웃 구조로 고정 기록된다. `## ` prefix 없이 제목 텍스트만 둔다.
+    // 콜아웃 섹션 제목. 노트 본문은 분석(summary) → 원본(quote) 순서의 콜아웃 구조로
+    // 고정 기록된다. `## ` prefix 없이 제목 텍스트만 둔다.
+    // `refinedHeader`는 AI 교정 기능 제거 후에도 과거에 생성된 노트의 `tip` 콜아웃을
+    // 이어쓰기(재직렬화) 할 때 제목을 유지하기 위해 남아 있다.
     analysisHeader: "Analysis result",
     refinedHeader: "Refined transcript",
     originalHeader: "Original transcript",

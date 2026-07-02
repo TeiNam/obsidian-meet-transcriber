@@ -187,6 +187,15 @@ export default class TranscribePlugin extends Plugin {
 	/** 사이드바가 편집 모드인지 여부. 버튼 정책 입력. */
 	private isEditing = false;
 
+	/**
+	 * Stop 이후 Transcript_Note 저장(파일 I/O)이 진행 중인지 여부.
+	 *
+	 * `SidebarView` 는 `showSavingSpinner`로 버튼을 이미 잠그지만, 그건 UI 레벨 방어일
+	 * 뿐이다. `handleStartStopClick` 도 이 플래그를 직접 확인해 저장이 끝나기 전에
+	 * 새 세션이 시작되는 것을 한 번 더 막는다(레이스 컨디션 방지 이중 방어선).
+	 */
+	private isSaving = false;
+
 	/** 상태 머신 onChange 리스너 해제 함수(onunload 에서 호출). */
 	private stateUnsubscribe: (() => void) | null = null;
 
@@ -625,6 +634,13 @@ export default class TranscribePlugin extends Plugin {
 		if (this.state.getState() === "streaming") {
 			await this.stopStreaming();
 		} else {
+			// 직전 Stop 의 저장이 아직 진행 중이면 새 세션을 거부한다. UI 버튼은 이미
+			// `showSavingSpinner` 로 비활성화되지만, 방어적으로 한 번 더 확인한다
+			// (레이스 컨디션 방지 — 저장 완료 시점의 상태 덮어쓰기를 막는다).
+			if (this.isSaving) {
+				new Notice(this.t.notices.singleSessionActive, NOTICE_DURATION_MS);
+				return;
+			}
 			await this.startStreaming();
 		}
 	}
@@ -949,6 +965,14 @@ export default class TranscribePlugin extends Plugin {
 			return;
 		}
 
+		// 저장(파일 I/O)이 끝날 때까지 시작/편집/분석 버튼을 잠근다. 상태 머신은 이미
+		// "streaming" 을 벗어나 있어(stopped) FSM 만으로는 Start 재클릭이 막히지 않는다.
+		// 이 구간에 아무 잠금이 없으면, 사용자가 저장이 오래 걸린다고 오인해 Start 를
+		// 다시 누를 수 있고, 그러면 새로 시작된 세션의 `currentTranscriptFile`/화면
+		// 상태가 이번 저장 완료 시점에 조용히 덮어써지는 레이스 컨디션이 발생한다.
+		this.isSaving = true;
+		this.forEachSidebar((view) => view.showSavingSpinner(true));
+		this.refreshSidebarButtons();
 		try {
 			const file = await this.saveBufferAsTranscript();
 			if (file !== null) {
@@ -965,6 +989,10 @@ export default class TranscribePlugin extends Plugin {
 			console.error("[TranscribePlugin] saveTranscript failed:", err);
 			new Notice(this.t.notices.ioError, NOTICE_DURATION_MS);
 			// 상태는 stopped 유지 — 사용자가 재시도 가능(Requirement 4.8).
+		} finally {
+			this.isSaving = false;
+			this.forEachSidebar((view) => view.showSavingSpinner(false));
+			this.refreshSidebarButtons();
 		}
 	}
 
@@ -1113,16 +1141,16 @@ export default class TranscribePlugin extends Plugin {
 	 */
 	private beginTranslationSession(): void {
 		this.translationService.beginSession({
-			onResolved: (segmentId, translatedText) => {
+			onResolved: (_segmentId, translatedText, placeholderEl) => {
 				this.applyTranslationToPlaceholder(
-					segmentId,
+					placeholderEl,
 					translatedText,
 					"resolved",
 				);
 			},
-			onRejected: (segmentId, _errorCode) => {
+			onRejected: (_segmentId, _errorCode, placeholderEl) => {
 				this.applyTranslationToPlaceholder(
-					segmentId,
+					placeholderEl,
 					this.t.notices.translationFailedSingle,
 					"failed",
 				);
@@ -1151,28 +1179,20 @@ export default class TranscribePlugin extends Plugin {
 	/**
 	 * Final segment 의 placeholder DOM 에 번역 결과 또는 실패 문구를 부착한다.
 	 *
-	 * placeholder 는 라인 컨테이너의 `data-segment-id` 속성으로 segmentId 를 보관하므로
-	 * 사이드바 컨테이너에서 `[data-segment-id="N"] .translation-line` 로 직접 lookup 한다.
-	 * 본 메서드는 placeholder 가 detached 거나 사이드바가 닫혀서 찾을 수 없을 경우
-	 * 조용히 종료한다 (Requirement 13.5 표시 순서 보장은 placeholder 위치 안정성으로
-	 * 자동 보장됨).
+	 * `Translation_Service` 가 큐에 보관해 둔 `placeholderEl` 참조를 콜백 인자로 그대로
+	 * 전달해 주므로, `data-segment-id` 로 사이드바 DOM 전체를 다시 querySelector 할
+	 * 필요가 없다. 이전 구현은 세그먼트마다 DOM 검색을 수행해 긴 회의(세그먼트 수 증가)
+	 * 에서 번역 완료 처리 비용이 함께 커졌다.
 	 */
 	private applyTranslationToPlaceholder(
-		segmentId: number,
+		placeholderEl: HTMLElement,
 		text: string,
 		state: "resolved" | "failed",
 	): void {
-		this.forEachSidebar((view) => {
-			const root = view.containerEl;
-			const placeholder = root.querySelector<HTMLElement>(
-				`[data-segment-id="${segmentId}"] .translation-line`,
-			);
-			if (!placeholder) return;
-			placeholder.setText(state === "resolved" ? `→ ${text}` : text);
-			if (state === "failed") {
-				placeholder.addClass("translation-failed");
-			}
-		});
+		placeholderEl.setText(state === "resolved" ? `→ ${text}` : text);
+		if (state === "failed") {
+			placeholderEl.addClass("translation-failed");
+		}
 	}
 
 	/**
@@ -1316,17 +1336,17 @@ export default class TranscribePlugin extends Plugin {
 			translationOutputFormat: this.settings.translationOutputFormat,
 		});
 
-		// AI 교정(원본 보존). 토글이 켜져 있고 자격 증명/모델/리전이 모두 있으면 교정본을
-		// 만든다. 실패/비활성 시 null 이며 원본 콜아웃만 기록된다.
-		const refined = await this.refineOrNull(original);
+		// AI 교정 기능은 제거되었다 — refined 는 항상 null. `buildTranscriptNoteBody` /
+		// `mergeContinuedSession` 은 레거시 노트에 남아있는 `tip` 콜아웃(과거 교정본)을
+		// 보존하는 경로를 여전히 지원하지만, 신규로 생성하지는 않는다.
 		const titles = {
 			analysis: this.t.analysisHeader,
 			original: this.t.originalHeader,
 			refined: this.t.refinedHeader,
 		};
 
-		// 이어하기: 기존 노트의 원본/교정본 콜아웃 안쪽에 세션 구분선과 함께 병합한다
-		// (콜아웃을 새로 추가하지 않고 각 1개로 유지). 새 파일은 만들지 않는다.
+		// 이어하기: 기존 노트의 원본 콜아웃 안쪽에 세션 구분선과 함께 병합한다
+		// (콜아웃을 새로 추가하지 않고 하나로 유지). 새 파일은 만들지 않는다.
 		const isContinuing =
 			this.continueSession && this.currentTranscriptFile !== null;
 		if (isContinuing && this.currentTranscriptFile !== null) {
@@ -1336,7 +1356,7 @@ export default class TranscribePlugin extends Plugin {
 			const combined = mergeContinuedSession({
 				existingBody,
 				newOriginal: original,
-				newRefined: refined,
+				newRefined: null,
 				divider,
 				titles,
 			});
@@ -1346,7 +1366,7 @@ export default class TranscribePlugin extends Plugin {
 			return file;
 		}
 
-		const body = buildTranscriptNoteBody({ original, refined, titles });
+		const body = buildTranscriptNoteBody({ original, refined: null, titles });
 
 		const meta: TranscriptNoteMeta = {
 			startedAt: this.sessionStartedAt ?? new Date().toISOString(),
@@ -1363,50 +1383,6 @@ export default class TranscribePlugin extends Plugin {
 		this.transcribeService.clearBuffer();
 		this.sessionStartedAt = null;
 		return file;
-	}
-
-	/**
-	 * 교정본을 반환한다. 교정이 비활성/자격증명 부족/실패/빈 응답이면 `null`.
-	 * 본문 조립에서 교정본 콜아웃 포함 여부를 결정하는 데 쓰인다.
-	 */
-	private async refineOrNull(original: string): Promise<string | null> {
-		if (!this.settings.refineEnabled) return null;
-		// 자격 증명 / 모델 / 리전 어느 하나라도 비어 있으면 교정 단계 자체를 건너뛴다.
-		if (
-			this.settings.accessKeyId.trim().length === 0 ||
-			this.settings.secretAccessKey.trim().length === 0 ||
-			this.settings.region.trim().length === 0 ||
-			this.settings.bedrockModelId.trim().length === 0 ||
-			original.trim().length === 0
-		) {
-			return null;
-		}
-
-		try {
-			const refined = await this.bedrockService.refineTranscript({
-				credentials: {
-					accessKeyId: this.settings.accessKeyId,
-					secretAccessKey: this.settings.secretAccessKey,
-				},
-				region: this.settings.region,
-				modelId: this.settings.bedrockModelId,
-				transcript: original,
-				locale: this.settings.uiLocale,
-				userInstruction: this.settings.refinementInstruction,
-			});
-			const refinedTrimmed = refined.trim();
-			if (refinedTrimmed.length === 0) {
-				// 모델이 빈 응답을 준 경우는 실패와 동급으로 취급해 원본만 저장.
-				console.error("[TranscribePlugin] refine returned empty body");
-				new Notice(this.t.notices.refineFailed);
-				return null;
-			}
-			return refinedTrimmed;
-		} catch (err) {
-			console.error("[TranscribePlugin] refine failed:", err);
-			new Notice(this.t.notices.refineFailed);
-			return null;
-		}
 	}
 
 	/**

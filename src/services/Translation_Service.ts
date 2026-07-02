@@ -81,10 +81,22 @@ export interface Translation_Queue_Item {
  * - `onAutoDisabled`: 30 초 윈도우 3 회 실패 도달 시 1 회. Notice 표시는 호출자 책임.
  * - `onCostCounterChanged`: 누적 코드포인트 카운터 변경 시 호출 (Requirement 13.9).
  *   매 enqueue 직후 1 회 (호출이 실제 발사된 경우에만).
+ *
+ * `onResolved` / `onRejected` 는 큐에 보관해 둔 `placeholderEl` 을 그대로 함께 전달한다.
+ * 호출자가 `data-segment-id` 로 DOM 전체를 다시 querySelector 하지 않아도 되므로,
+ * 세그먼트가 누적될수록(긴 회의) 검색 비용이 커지는 것을 방지한다.
  */
 export interface Translation_Service_Callbacks {
-	onResolved(segmentId: number, translatedText: string): void;
-	onRejected(segmentId: number, errorCode: string): void;
+	onResolved(
+		segmentId: number,
+		translatedText: string,
+		placeholderEl: HTMLElement,
+	): void;
+	onRejected(
+		segmentId: number,
+		errorCode: string,
+		placeholderEl: HTMLElement,
+	): void;
 	onAutoDisabled(): void;
 	onCostCounterChanged(totalCharCount: number): void;
 }
@@ -357,12 +369,16 @@ export class Translation_Service {
 	 *
 	 * `endSession` 후 도착한 응답은 콜백이 null 이므로 조용히 무시된다 (큐가 비어있어
 	 * `item` 이 undefined 인 경우도 동일).
+	 *
+	 * 콜백 발사 후에는 큐에서 항목을 제거한다 — 완료된 항목을 계속 들고 있으면
+	 * 긴 회의(세그먼트 수가 많은 세션)에서 큐가 무한히 커지고 DOM 참조(`placeholderEl`)
+	 * 도 함께 누적되어 메모리 사용량이 계속 늘어난다.
 	 */
 	private handleResolved(segmentId: number, translatedText: string): void {
 		const item = this.queue.get(segmentId);
 		if (!item) return;
-		item.state = "done";
-		this.callbacks?.onResolved(segmentId, translatedText);
+		this.queue.delete(segmentId);
+		this.callbacks?.onResolved(segmentId, translatedText, item.placeholderEl);
 	}
 
 	/**
@@ -370,15 +386,15 @@ export class Translation_Service {
 	 * 임계값 도달 시 `onAutoDisabled` 1 회 발사.
 	 *
 	 * 본 메서드는 사유 코드만 `console.error` 로 기록한다 (Requirement 11.1: 자격 증명/응답
-	 * 본문/AWS 응답 전체 미기록).
+	 * 본문/AWS 응답 전체 미기록). `handleResolved` 와 동일한 이유로 처리 후 큐에서 제거한다.
 	 */
 	private handleRejected(segmentId: number, err: unknown): void {
 		const item = this.queue.get(segmentId);
 		if (!item) return;
-		item.state = "failed";
+		this.queue.delete(segmentId);
 		const errorCode = classifyError(err);
 		console.error(`translation_failed: ${errorCode}`);
-		this.callbacks?.onRejected(segmentId, errorCode);
+		this.callbacks?.onRejected(segmentId, errorCode, item.placeholderEl);
 		this.recordFailure();
 	}
 
